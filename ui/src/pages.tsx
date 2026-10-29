@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { color, EXTRA_NAME_MAX, GR3X_RATIO_NAME_MAX, halateRgba, halationLight, MAX_EXTRA_SLOTS, SHUTDOWN_H, SHUTDOWN_NAME_MAX, SHUTDOWN_W } from '@grmod/core';
+import { color, EXTRA_NAME_MAX, filmpack, GR3X_RATIO_NAME_MAX, halateRgba, halationLight, MAX_EXTRA_SLOTS, SHUTDOWN_H, SHUTDOWN_NAME_MAX, SHUTDOWN_W } from '@grmod/core';
 import type { SlotId } from '@grmod/core';
 import type { ReactNode } from 'react';
 import { DropZone, FileButton, Ico, IconCanvas, Menu, Prop, RatioIcon, RgbCanvas, Segmented, Select, Switch } from './components';
@@ -9,6 +9,7 @@ import type { Key } from './i18n';
 import type { Crop } from './pixels';
 import { onUiScale, uiScale } from './fit';
 import { applySlot } from './preview';
+import { LibraryDialog, RecipeSection, SampleStrip } from './library';
 import {
   addRatio, addWallFiles, askForOfficial, bridgeLoaded, loadFirmwareFile, loadIconImage, loadPresetFile, loadPreviewFile, moveWall, nameProblem, openCrop, outputFirmware, previewPhoto, removePreset, removeWall,
   maxRatios, ratioName, ratioProblem, removeRatio, setActiveRatio, setActiveSlot, setCrop, setIcon, setName, setPreviewMode, setRatio, setRatioBackdrop, useStore, wallBitmap,
@@ -18,10 +19,11 @@ import {
   setDirectFlash,
   extraName, extraNameProblem, extraProblem, halationOf, removeExtraSlot, setExtraCount, setExtraName, setHalation, slotOf,
   filmCountChoosable, removeFilm, setFilmCount,
+  libraryLook, recipeOf, recipesAvailable, useWholeLibrary, addBuiltInPictures,
   hasLookLayout, isGr3, KEEP_VISIBLE, lookHiddenNow, lookMonoOnly, lookName, lookOrderAvailable, lookOrderNow, moveLook, moveLookTo, resetLookLayout, setLookHidden,
   setWallName, wallMax, wallMenuProblem,
 } from './store';
-import type { ExtraSlot, RatioItem, SlotKey, WallItem } from './store';
+import type { ExtraSlot, HaloColour, RatioItem, SlotKey, WallItem } from './store';
 
 const isPreset = (f: File): boolean => /\.(xmp|cube)$/i.test(f.name);
 const isFirmware = (f: File): boolean => /\.bin$/i.test(f.name);
@@ -62,14 +64,19 @@ function PhotoCompare({ params }: { params?: color.SlotParams }) {
   const result = useStore((s) => slotOf(s.activeSlot, s)?.preset?.result);
   const light = useMemo(() => (result ? halationLight(result.curves, result.postQ9) : undefined), [result]);
   const base = useMemo(() => (photo && params ? applySlot(params, photo, gr3x) : null), [photo, params, gr3x]);
-  // The added slot's halation at the level chosen for the preview, as the camera computes it.
+  // GR III / IIIx films (round 10): the film's grain, as the camera's module computes it.
+  const grain = useStore((s) => (recipesAvailable(s) && s.info?.family === 'gr3x' && !s.activeSlot.startsWith('x-') ? color.grainSetting(recipeOf(s.activeSlot as SlotId, s).grain) : 0));
+  // The added slot's halation at the level chosen for the preview, as the camera computes it; then the grain.
   const after = useMemo(() => {
-    if (!base || !halo) return base;
+    if (!base || (!halo && !grain)) return base;
     const out = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height);
-    halateRgba(out.data, out.width, out.height, halo.preview as 1 | 2 | 3, light, haloColour);
+    if (halo) halateRgba(out.data, out.width, out.height, halo.preview as 1 | 2 | 3, light, haloColour);
+    // The grain of a 100% crop of the camera's JPEG at the preview's own pixels (what the 1:1 loupe
+    // shows); the fitted view scales it down as a screen shows a whole photo.
+    if (grain) color.grainRgb(out.data, out.width, out.height, grain, 4, out.width);
     return out;
-  }, [base, haloLevel, light, haloColour]);
-  return <Compare photo={photo} after={after} label={t('preset')} />;
+  }, [base, haloLevel, light, haloColour, grain]);
+  return <Compare photo={photo} after={after} label={t('preset')} samples />;
 }
 
 function usePhoto(): ImageData | null {
@@ -78,12 +85,25 @@ function usePhoto(): ImageData | null {
 }
 
 /** `photo` on the left of a draggable divider, `after` (labelled `label`) on the right. */
-function Compare({ photo, after, label }: { photo: ImageData | null; after: ImageData | null; label: string }) {
+function Compare({ photo, after, label, samples }: { photo: ImageData | null; after: ImageData | null; label: string; samples?: boolean }) {
   const beforeRef = useRef<HTMLCanvasElement>(null);
   const afterRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState(0.5);
   const dragging = useRef(false);
+  // The 1:1 loupe: the photo at its own pixels, centred where the pointer is; the divider stays.
+  const [zoom, setZoom] = useState(false);
+  const [focus, setFocus] = useState({ x: 0.5, y: 0.5 });
+  const [boxW, setBoxW] = useState(0);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [photo]);
+  const k = zoom && photo && boxW ? Math.max(1, photo.width / (boxW * (window.devicePixelRatio || 1))) : 1;
+  const layer = { transform: k > 1 ? `scale(${k})` : undefined, transformOrigin: `${(focus.x * 100).toFixed(2)}% ${(focus.y * 100).toFixed(2)}%` };
   useEffect(() => {
     const c = beforeRef.current;
     if (!c || !photo) return;
@@ -104,14 +124,17 @@ function Compare({ photo, after, label }: { photo: ImageData | null; after: Imag
   const pct = `${(pos * 100).toFixed(2)}%`;
   return (
     <div
-      ref={boxRef} className={`compare ${after ? '' : 'plain'}`} style={{ '--ar': String(photo.width / photo.height) } as React.CSSProperties}
-      onPointerDown={(e) => { if (!after || (e.target as HTMLElement).closest('button')) return; e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); dragging.current = true; at(e.clientX); }}
-      onPointerMove={(e) => { if (dragging.current) at(e.clientX); }}
+      ref={boxRef} className={`compare ${after ? '' : 'plain'} ${zoom ? 'zooming' : ''}`} style={{ '--ar': String(photo.width / photo.height) } as React.CSSProperties}
+      onPointerDown={(e) => { if (!after || (e.target as HTMLElement).closest('button')) return; if (zoom && !(e.target as HTMLElement).closest('.compare-line')) return; e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); dragging.current = true; at(e.clientX); }}
+      onPointerMove={(e) => {
+        if (dragging.current) { at(e.clientX); return; }
+        if (zoom) { const r = boxRef.current?.getBoundingClientRect(); if (r && r.width > 0) setFocus({ x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) }); }
+      }}
       onPointerUp={() => { dragging.current = false; }} onPointerCancel={() => { dragging.current = false; }}
       onDoubleClick={() => setPos(0.5)}
     >
-      {after && <canvas ref={afterRef} className="compare-img" />}
-      <canvas ref={beforeRef} className="compare-img" style={after ? { clipPath: `inset(0 ${(100 - pos * 100).toFixed(2)}% 0 0)` } : undefined} />
+      {after && <div className="compare-layer"><canvas ref={afterRef} className={`compare-img ${zoom ? 'zoomed' : ''}`} style={layer} /></div>}
+      <div className="compare-layer" style={after ? { clipPath: `inset(0 ${(100 - pos * 100).toFixed(2)}% 0 0)` } : undefined}><canvas ref={beforeRef} className={`compare-img ${zoom ? 'zoomed' : ''}`} style={layer} /></div>
       {after && (
         <>
           <span className="compare-tag l" style={{ opacity: pos < 0.16 ? 0 : 1 }}>{t('original')}</span>
@@ -128,6 +151,8 @@ function Compare({ photo, after, label }: { photo: ImageData | null; after: Imag
         </>
       )}
       <FileButton className="btn mini compare-swap" accept="image/*" title={t('changePhoto')} onFiles={(f) => { void loadPreviewFile(f[0]); }}>{Ico.image}</FileButton>
+      {after && <button className={`btn mini compare-zoom ${zoom ? 'on' : ''}`} title={t('zoom11')} aria-label={t('zoom11')} aria-pressed={zoom} onClick={() => setZoom((z) => !z)}>1:1</button>}
+      {samples && <SampleStrip />}
     </div>
   );
 }
@@ -142,7 +167,10 @@ function PreviewPane({ below, belowH = 0 }: { below?: ReactNode; belowH?: number
   const slots = useStore(s => s.slots);
   const mode = useStore((s) => s.previewMode);
   const active = useStore((s) => s.activeSlot);
-  const params = useStore((s) => slotOf(s.activeSlot, s)?.preset?.result?.params);
+  // The film's colour with its recipe's teal sky (GR III / IIIx); a stable object per change.
+  const baseParams = useStore((s) => slotOf(s.activeSlot, s)?.preset?.result?.params);
+  const sky = useStore((s) => (recipesAvailable(s) && !s.activeSlot.startsWith('x-') ? recipeOf(s.activeSlot as SlotId, s).sky : 0));
+  const params = useMemo(() => (baseParams ? color.withTealSky(baseParams, sky) : undefined), [baseParams, sky]);
   const extras = useStore((s) => s.extras);
   const extraLabels = useStore((s) => s.extras.map((x) => extraName(x, s)).join('\u0000'));
   const lang = useStore((s) => s.lang);
@@ -199,6 +227,10 @@ function SlotCard({ id }: { id: SlotId }) {
   const problem = nameProblem(info, id, lang, name);
   const p = slot.preset;
   const first = id === 'CY'; // the one the tour points at
+  // GR III / IIIx with a film count: films of the library and recipes.
+  const recipes = useStore((s) => recipesAvailable(s));
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const look = libraryLook(p?.library);
   return (
     <DropZone className={`card ${active ? 'on' : ''}`} tour={first ? 'ic-slot' : undefined} accept={isPreset} onFiles={(f) => { void loadPresetFile(id, f[0]); }}>
       <div className="card-in" onPointerDownCapture={() => setActiveSlot(id)} onFocusCapture={() => setActiveSlot(id)}>
@@ -214,7 +246,31 @@ function SlotCard({ id }: { id: SlotId }) {
           {choosable && <button className="btn ghost icon-only extra-x" title={t('extraRemove')} aria-label={t('extraRemove')} onClick={() => removeFilm(id)}>{Ico.x}</button>}
         </div>
         <div className="props">
-          <Prop label={t('preset')} tour={first ? 'ic-preset' : undefined}>
+          {recipes && (
+            <div className="film-pick" data-tour={first ? 'ic-preset' : undefined}>
+              {!p && (
+                <div className="film-pick-empty">
+                  <button className="btn primary-soft" onClick={() => setLibraryOpen(true)}>{Ico.aperture}<span>{t('libraryChoose')}</span></button>
+                  <FileButton className="btn ghost" accept=".xmp,.cube" onFiles={(f) => { void loadPresetFile(id, f[0]); }}>{Ico.file}<span>{t('libraryImport')}</span></FileButton>
+                </div>
+              )}
+              {p && (
+                <div className="film-pick-on">
+                  <div className={`file-chip ${p.error ? 'bad' : ''}`}>
+                    <button className="file-main" title={t('libraryChoose')} onClick={() => setLibraryOpen(true)}>{look ? Ico.aperture : Ico.file}<span className="ellipsis">{look ? look.name : p.result?.title || p.fileName}</span></button>
+                    <button className="file-x" title={t('remove')} aria-label={t('remove')} onClick={() => removePreset(id)}>{Ico.x}</button>
+                  </div>
+                  {p.busy && <span className="spinner small" />}
+                  {p.error && <span className="chip bad" title={p.error}><span className="ellipsis">{p.error}</span></span>}
+                  {p.result && !look && <span className="small muted">{t('gr3xFit', { mean: p.result.meanDE.toFixed(1), p95: p.result.p95DE.toFixed(1) })}</span>}
+                </div>
+              )}
+              {look && <p className="film-about">{look.about}</p>}
+              <RecipeSection id={id} />
+            </div>
+          )}
+          {libraryOpen && <LibraryDialog slot={id} onClose={() => setLibraryOpen(false)} />}
+          {!recipes && <Prop label={t('preset')} tour={first ? 'ic-preset' : undefined}>
             {!p && <FileButton className="btn dashed fill" accept=".xmp,.cube" onFiles={(f) => { void loadPresetFile(id, f[0]); }}>{Ico.plus}<span>{t('dropPreset')}</span></FileButton>}
             {p && (
               <div className="preset">
@@ -231,16 +287,16 @@ function SlotCard({ id }: { id: SlotId }) {
                 )}
               </div>
             )}
-          </Prop>
+          </Prop>}
           <Prop label={t('icon')} tour={first ? 'ic-icon' : undefined}>
             <div className="chips">
-              <Segmented value={slot.icon.mode} onChange={(mode) => setIcon(id, { mode })} options={[{ value: 'keep', label: t('iconKeep') }, { value: 'text', label: t('iconText') }, { value: 'image', label: t('iconImage') }]} />
-              {slot.icon.mode !== 'keep' && <Segmented value={slot.icon.style} onChange={(style) => setIcon(id, { style })} options={[{ value: 'film', label: t('styleFilm') }, { value: 'plain', label: t('stylePlain') }]} />}
+              <Segmented value={slot.icon.mode} onChange={(mode) => setIcon(id, mode === 'library' ? { mode, look: look?.name } : { mode })} options={[{ value: 'keep', label: t('iconKeep') }, ...(slot.icon.mode === 'library' || look ? [{ value: 'library' as const, label: t('library') }] : []), { value: 'text', label: t('iconText') }, { value: 'image', label: t('iconImage') }]} />
+              {slot.icon.mode !== 'keep' && slot.icon.mode !== 'library' && <Segmented value={slot.icon.style} onChange={(style) => setIcon(id, { style })} options={[{ value: 'film', label: t('styleFilm') }, { value: 'plain', label: t('stylePlain') }]} />}
               {slot.icon.mode === 'text' && <input className="input short" value={slot.icon.text} maxLength={8} spellCheck={false} placeholder="400" aria-label={t('iconText')} onChange={(e) => setIcon(id, { text: e.target.value })} />}
               {slot.icon.mode === 'image' && <FileButton className="btn small" accept="image/*" onFiles={(f) => { void loadIconImage(id, f[0]); }}>{t('chooseImage')}</FileButton>}
             </div>
           </Prop>
-          {(gr3x || p?.result) && <HalationProp k={id} />}
+          {!recipes && (gr3x || p?.result) && <HalationProp k={id} />}
         </div>
       </div>
     </DropZone>
@@ -262,6 +318,7 @@ function FilmCountHead() {
         </div>
       </div>
       <div className="extras-count"><Select variant="box" value={String(n)} onChange={(v) => setFilmCount(Number(v))} options={options} label={t('extraTitle')} /></div>
+      <button className="btn ghost small lib-all" onClick={() => useWholeLibrary()}>{Ico.aperture}<span>{t('libraryAll', { n: Math.min(max, filmpack.LOOKS.length) })}</span></button>
     </div>
   );
 }
@@ -643,7 +700,8 @@ function HalationProp({ k }: { k: SlotKey }) {
             <Segmented value={String(fixed && preview === 2 ? 3 : preview)} onChange={(v) => setHalation(k, { preview: Number(v) as 0 | 1 | 2 | 3 })} options={fixed
               ? [{ value: '0', label: t('haloOff') }, { value: '1', label: t('haloWeak') }, { value: '3', label: t('haloStrong') }]
               : [{ value: '0', label: t('haloOff') }, { value: '1', label: t('haloWeak') }, { value: '2', label: t('haloMedium') }, { value: '3', label: t('haloStrong') }]} />
-            {preview > 0 && !fixed && <Segmented value={colour} onChange={(v) => setHalation(k, { colour: v as 'red' | 'white' })} options={[{ value: 'red', label: t('haloRed') }, { value: 'white', label: t('haloWhite') }]} />}
+            {preview > 0 && !fixed && <Segmented value={colour} onChange={(v) => setHalation(k, { colour: v as HaloColour })}
+              options={[{ value: 'red', label: t('haloRed') }, ...(gr3x ? [{ value: 'orange', label: t('haloOrange') }, { value: 'gold', label: t('haloGold') }] : []), { value: 'white', label: t('haloWhite') }]} />}
           </div>
         )}
         <span className="muted small halo-note">{t(cinema ? 'halationCinemaSub' : fixed ? 'gr3xHalationSub' : 'halationSub')}</span>
@@ -1085,6 +1143,7 @@ export function WallpaperPage() {
         <h1>{t('navWall')}</h1>
         {info && (
           <div className="head-right">
+            {wall.length < max && <button className="btn ghost small" onClick={() => { void addBuiltInPictures(); }}>{Ico.plus}<span>{t('endscreenAdd')}</span></button>}
             {wall.length > 0 && <span className={`chip ${wall.length > max ? 'warn' : ''}`}>{wall.length}/{max}</span>}
           </div>
         )}

@@ -129,10 +129,11 @@ const zh = {
   softAdjSub: '直出模拟柔光滤镜效果', softAdjLine: '柔焦  ·  ADJ 拨杆（关 / 弱 / 中 / 强）',
   navDate: '时间戳', dateSub: '把日期（可加上影像控制的名称）印在照片上', dateLine: '时间戳  ·  拍摄辅助 › 拍摄时间戳（\'26 10 08 / 2026.10.08 17:34，各可加名称）',
   navFlash: '直闪模式', flashSub: '当闪光灯以固定功率闪光时，启用直闪模式以让相机按照对焦距离与输入的闪光灯 GN 值进行曝光。', flashLine: '直闪模式  ·  闪光模式第 5 项（固定功率，按对焦距离曝光）',
+  tealHueLine: '胶片的“色调”一项改为天空青色（−4..+4）', grainRowLine: '胶片新增“颗粒效果”一项（关 / 1 / 2 / 3），光晕颜色可选红 / 橙 / 金 / 白，“色调”一项改名为“天空青色”',
   navMono: '黑白预设', monoSub: '解锁 GR IV Monochrome 的照片风格', monoLine: '黑白预设  ·  解锁 GR IV Monochrome 的照片风格',
   extraTitle: '新增槽位', extraSub: '在 Cinema 之后再加影像控制槽位，最多 {n} 个', extraAdd: '新增槽位', extraCountLabel: '新增 {n} 个', extraNone: '不新增',
   prevSlot: '上一个槽位', nextSlot: '下一个槽位',
-  halation: '光晕', haloLabel: '光晕', halationSub: '在相机内影像控制的参数调整处控制。此处仅用于预览', gr3xHalationRowsSub: '在相机内影像控制的参数调整处控制（GR III：“光晕”关 / 1 / 2 / 3，“颜色”红 / 白）。此处仅用于预览', gr3xHalationSub: '强度写进固件（GR III 没有可用的参数滑块）。只出现在照片里，取景画面不显示', haloPreview: '预览', haloOff: '关', haloWeak: '弱', haloMedium: '中', haloStrong: '强', haloRed: '红', haloWhite: '白',
+  halation: '光晕', haloLabel: '光晕', halationSub: '在相机内影像控制的参数调整处控制。此处仅用于预览', gr3xHalationRowsSub: '在相机内影像控制的参数调整处控制（GR III：“光晕”关 / 1 / 2 / 3，“颜色”红 / 橙 / 金 / 白）。此处仅用于预览', gr3xHalationSub: '强度写进固件（GR III 没有可用的参数滑块）。只出现在照片里，取景画面不显示', haloPreview: '预览', haloOff: '关', haloWeak: '弱', haloMedium: '中', haloStrong: '强', haloRed: '红', haloWhite: '白', haloGold: '金', haloOrange: '橙',
   haloOn: '开', halationCinemaSub: '开启后，这个槽位在相机里的“色调”会变成“光晕”（关 / 开，按 Fn 调强度和颜色），载入的预设不受色调影响。不开启则保持原样',
   extraSlot: '新增槽位 {n}', extraNameLong: '最多 12 个字符', extraNameBad: '仅限英文、数字、符号', extraNeedsPreset: '需要导入预设', extraNeedsIcon: '需要图标',
   extraMax: '最多新增 {n} 个槽位', extraIncomplete: '有新增槽位还没准备好（预设、名称或图标）', extraLine: '新增影像控制槽位 {n}  ·  {l}', extraRemove: '删除这个槽位',
@@ -141,6 +142,15 @@ const zh = {
   icViews: '影像控制页面', icViewSlots: '影像控制', icViewOrder: '菜单顺序', lookOrderShown: '{n} 个显示', lookOrderMoved: '{name} 移到第 {n} 位', lookOrderDrag: '拖动调整顺序',
   tIcViewsT: '槽位与菜单顺序', tIcViewsB: '“影像控制”设置各个槽位；“菜单顺序”调整相机影像控制菜单里 look 的顺序，也可以隐藏不用的 look。',
   tIcSoftT: '附加功能', tIcSoftB: '柔焦：打开后，可将“柔焦”效果增添到 ADJ 快捷菜单，有关、弱、中、强四档，效果无法实时预览，可与 HDF 滤镜同时启用。\n时间戳：在照片右下角打印日期（竖拍时也是看照片时的右下角；菜单里的“跟随相机方向”关掉后，按横向位置打印）。刷入后默认关闭，在“拍摄辅助 › 拍摄时间戳”里打开，可选两种样式。\n黑白风格：解锁 GR IV Monochrome 机型的 6 个黑白风格。\n直闪模式：当闪光灯以固定功率闪光时，启用直闪模式以让相机按照对焦距离与输入的闪光灯 GN 值进行曝光。',
+  // GR Mod's film library, film recipes (GR III / IIIx), sample photos
+  close: '关闭', zoom11: '1:1 放大查看（移动鼠标浏览）', library: '胶片库', libraryChoose: '选择胶片', libraryImport: '导入 .cube / .xmp', libraryAll: '一键载入全部 {n} 款胶片', libraryAllDone: '已载入 {n} 款胶片',
+  librarySearch: '搜索胶片', groupFujifilm: '富士胶片模拟', groupStock: '经典胶卷', groupOppo: 'OPPO Find X9', groupCreative: '创意',
+  recipe: '配方', filmGrain: '颗粒', recipeSharpness: '锐度', recipeClarity: '清晰度', recipeShading: '暗角', recipeSky: '天空青色', recipeSkyHint: '把蓝天推向青色（+）或推回蓝色（−），肤色和黄色尽量保持不变。相机里是这款胶片的“色调”一项，从这个值开始，可随时调整',
+  grainOff: '关', grainWeak: '弱', grainMedium: '中', grainStrong: '强', grainSmall: '细', grainLarge: '粗',
+  recipeNote: '相机里这款胶片从这些值开始；在相机里的修改会保留。', recipePreviewNote: '预览显示色彩、光晕和颗粒；锐度、清晰度、暗角由相机处理。',
+  haloStart: '光晕',
+  sampleSteps: '蒙马特台阶', sampleBasilica: '圣心大教堂', sampleForest: '树林', sampleHill: '山顶', sampleStream: '溪流', sampleSign: '标牌', sampleOwn: '我的照片', sampleCredit: 'GR III 原图 · 标准 · {name}',
+  endscreenAdd: '添加 GR Mod 内置图片', endscreenAdded: '已添加 {n} 张图片',
 };
 const en: typeof zh = {
   app: 'GR Mod',
@@ -273,10 +283,11 @@ const en: typeof zh = {
   softAdjSub: 'A soft-focus filter look, straight out of camera', softAdjLine: 'Soft focus  ·  ADJ lever (off / low / medium / high)',
   navDate: 'Date imprint', dateSub: 'Print the date (and the look\'s name) on photos', dateLine: 'Date imprint  ·  Shooting Assist › Date Imprint (\'26 10 08 / 2026.10.08 17:34, each with or without the look\'s name)',
   navFlash: 'Direct Flash', flashSub: 'When the flash fires at a fixed power, Direct Flash sets the exposure from the focus distance and the flash\'s guide number you enter.', flashLine: 'Direct Flash  ·  a fifth Flash Mode (fixed power, exposure from the focus distance)',
+  tealHueLine: 'The films’ Hue row becomes their teal sky (−4..+4)', grainRowLine: 'The films get a Grain Effect row (Off / 1 / 2 / 3) and more Halation colours (red / orange / gold / white); their Hue row is named Teal Sky',
   navMono: 'B&W presets', monoSub: 'Unlock the looks of the GR IV Monochrome', monoLine: 'B&W presets  ·  the looks of the GR IV Monochrome unlocked',
   extraTitle: 'Added slots', extraSub: 'More Image Control slots after the Cinema ones, at most {n}', extraAdd: 'Add slot', extraCountLabel: '{n} added', extraNone: 'None',
   prevSlot: 'Previous slot', nextSlot: 'Next slot',
-  halation: 'Halation', haloLabel: 'Halo', halationSub: 'Set in the camera, in Image Control\'s parameter adjustment. Here it is only previewed', gr3xHalationRowsSub: 'Set in the camera, in Image Control\'s parameter adjustment (GR III: Halation Off / 1 / 2 / 3, Colour red / white). Here it is only previewed', gr3xHalationSub: 'Built into the firmware at this strength (the GR III has no spare parameter slider). Only in the photos, not in live view', haloPreview: 'Preview', haloOff: 'Off', haloWeak: 'Weak', haloMedium: 'Medium', haloStrong: 'Strong', haloRed: 'Red', haloWhite: 'White',
+  halation: 'Halation', haloLabel: 'Halo', halationSub: 'Set in the camera, in Image Control\'s parameter adjustment. Here it is only previewed', gr3xHalationRowsSub: 'Set in the camera, in Image Control\'s parameter adjustment (GR III: Halation Off / 1 / 2 / 3, Colour red / orange / gold / white). Here it is only previewed', gr3xHalationSub: 'Built into the firmware at this strength (the GR III has no spare parameter slider). Only in the photos, not in live view', haloPreview: 'Preview', haloOff: 'Off', haloWeak: 'Weak', haloMedium: 'Medium', haloStrong: 'Strong', haloRed: 'Red', haloWhite: 'White', haloGold: 'Gold', haloOrange: 'Orange',
   haloOn: 'On', halationCinemaSub: 'When on, this slot\'s Toning becomes Halation in the camera (Off / On, Fn for strength and colour); the loaded preset does not use Toning. Off keeps it as it is',
   extraSlot: 'Added slot {n}', extraNameLong: 'At most 12 characters', extraNameBad: 'Letters, digits and symbols only', extraNeedsPreset: 'Needs a preset', extraNeedsIcon: 'Needs an icon',
   extraMax: 'At most {n} added slots', extraIncomplete: 'An added slot is not ready yet (preset, name or icon)', extraLine: 'Added Image Control slots {n}  ·  {l}', extraRemove: 'Remove this slot',
@@ -285,6 +296,15 @@ const en: typeof zh = {
   icViews: 'Image Control views', icViewSlots: 'Image Control', icViewOrder: 'Menu order', lookOrderShown: '{n} shown', lookOrderMoved: '{name} moved to position {n}', lookOrderDrag: 'Drag to reorder',
   tIcViewsT: 'Slots and menu order', tIcViewsB: '"Image Control" sets up the slots; "Menu order" arranges the looks of the camera\'s Image Control menu and hides the ones you do not use.',
   tIcSoftT: 'Additions', tIcSoftB: 'Soft focus: adds "Soft Focus" to the ADJ lever, with off, low, medium and high. The effect cannot be seen in live view; it can be used together with the HDF filter.\nDate imprint: prints the date in the bottom right corner of the photo (as it is viewed, also when shot upright; with "Follow Orientation" off in its menu, as stored). Off after flashing; turn it on under Shooting Assist › Date Imprint, two styles.\nB&W looks: unlocks the 6 black-and-white looks of the GR IV Monochrome.\nDirect Flash: when the flash fires at a fixed power, Direct Flash sets the exposure from the focus distance and the flash\'s guide number you enter.',
+  // GR Mod's film library, film recipes (GR III / IIIx), sample photos
+  close: 'Close', zoom11: 'Actual pixels (move the pointer to look around)', library: 'Film library', libraryChoose: 'Choose a film', libraryImport: 'Import .cube / .xmp', libraryAll: 'Use all {n} films', libraryAllDone: '{n} films loaded',
+  librarySearch: 'Search films', groupFujifilm: 'Fujifilm simulations', groupStock: 'Film stocks', groupOppo: 'OPPO Find X9', groupCreative: 'Creative',
+  recipe: 'Recipe', filmGrain: 'Grain', recipeSharpness: 'Sharpness', recipeClarity: 'Clarity', recipeShading: 'Shading', recipeSky: 'Teal sky', recipeSkyHint: 'Pushes blue skies toward teal (+) or back toward blue (−), keeping skin and yellows as they are as far as possible. In the camera it is the film’s Hue row, starting here and adjustable any time',
+  grainOff: 'Off', grainWeak: 'Weak', grainMedium: 'Medium', grainStrong: 'Strong', grainSmall: 'Small', grainLarge: 'Large',
+  recipeNote: 'The film starts from these in the camera; changes made there are kept.', recipePreviewNote: 'The preview shows colour, halation and grain; sharpness, clarity and shading are the camera\'s.',
+  haloStart: 'Halation',
+  sampleSteps: 'Montmartre steps', sampleBasilica: 'Basilica', sampleForest: 'Forest', sampleHill: 'Hilltop', sampleStream: 'Stream', sampleSign: 'Sign', sampleOwn: 'Your photo', sampleCredit: 'GR III original · Standard · {name}',
+  endscreenAdd: "Add GR Mod's pictures", endscreenAdded: '{n} pictures added',
 };
 export type Key = keyof typeof zh;
 const dict = (navigator.language || 'zh').toLowerCase().startsWith('zh') ? zh : en;

@@ -2,7 +2,8 @@
 // Standard preset produced (sRGB); the slot model is applied to it with lookup tables.
 import { color } from '@grmod/core';
 
-export const PREVIEW_MAX = 1280;
+/** Sharp on high-density screens, and the 1:1 loupe shows real detail (the samples are 2400 wide). */
+export const PREVIEW_MAX = 2400;
 
 /** Decode a picture and scale it to at most PREVIEW_MAX pixels on the long side. */
 export async function decodePreview(bytes: Uint8Array | Blob): Promise<ImageData> {
