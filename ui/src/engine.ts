@@ -1,0 +1,44 @@
+import type { BuildOptions, CameraModel, FirmwareBuild, FirmwareInfo, FirmwareSummary, PresetResult, RatioPreview, RatioSpec, ShutdownImage, SlotRequest, SoftFocusRequest } from '@grmod/core';
+
+export class EngineError extends Error {
+  code: string; details?: Record<string, number>;
+  constructor(code: string, message: string, details?: Record<string, number>) { super(message); this.code = code; this.details = details; }
+}
+
+// Built as a classic script (vite.config.ts: worker.format 'iife') so that browsers without module workers can run it; the dev server serves it as a module.
+const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: import.meta.env.DEV ? 'module' : 'classic' });
+let seq = 0;
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (f: number) => void }>();
+worker.onmessage = (ev: MessageEvent) => {
+  const m = ev.data as { id: number; ok?: boolean; result?: unknown; error?: { code: string; message: string; details?: Record<string, number> }; progress?: number };
+  const p = pending.get(m.id);
+  if (!p) return;
+  if (m.progress !== undefined) { p.onProgress?.(m.progress); return; }
+  pending.delete(m.id);
+  if (m.ok) p.resolve(m.result); else p.reject(new EngineError(m.error?.code || 'error', m.error?.message || 'error', m.error?.details));
+};
+function call<T>(msg: Record<string, unknown>, transfer: Transferable[] = [], onProgress?: (f: number) => void): Promise<T> {
+  const id = ++seq;
+  return new Promise<T>((resolve, reject) => {
+    pending.set(id, { resolve: resolve as (v: unknown) => void, reject, onProgress });
+    worker.postMessage({ ...msg, id }, transfer);
+  });
+}
+
+export const engine = {
+  reset: () => call<boolean>({ type: 'reset' }),
+  open: (raw: Uint8Array) => call<FirmwareInfo>({ type: 'open', raw: raw.slice().buffer }),
+  convert: (kind: 'xmp' | 'cube', text: string, options: { hue?: boolean } = {}) => call<PresetResult>({ type: 'convert', kind, text, options }),
+  build: (requests: SlotRequest[], ratios: RatioSpec[] = [], softFocus: SoftFocusRequest[] = [], options: BuildOptions = {}) => call<FirmwareBuild>({ type: 'build', requests, ratios, softFocus, options }),
+  /** What a ratio would become in the camera, given the ratios already in the list. */
+  ratio: (ratio: string, others: string[]) => call<RatioPreview>({ type: 'ratio', ratio, others }),
+  encode: (rgb: Uint8Array, model: CameraModel) => { const copy = rgb.slice(); return call<ShutdownImage>({ type: 'encode', rgb: copy.buffer, model }, [copy.buffer]); },
+  /** A 720x480 RGB picture as a power-off picture file of the firmware (chosen in the camera's menu). */
+  menuPicture: (rgb: Uint8Array) => { const copy = rgb.slice(); return call<Uint8Array>({ type: 'menuPicture', rgb: copy.buffer }, [copy.buffer]); },
+  script: (model: CameraModel, count: number) => call<string>({ type: 'script', model, count }),
+  /** What a firmware file is; the buffer is handed over to the worker. */
+  inspect: (raw: Uint8Array) => call<FirmwareSummary>({ type: 'inspect', raw: raw.buffer }, [raw.buffer as ArrayBuffer]),
+  /** The 1.12 bridge firmware, made from the open official file. */
+  bridge: () => call<Uint8Array>({ type: 'bridge' }),
+  heartbeat: (token: string) => call<boolean>({ type: 'heartbeat', token }),
+};
