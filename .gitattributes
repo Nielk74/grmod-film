@@ -1,0 +1,2 @@
+# The Direct Flash test pins the SHA-256 of this exact source: keep LF on every platform.
+tools/directflash/directflash.c text eol=lf
