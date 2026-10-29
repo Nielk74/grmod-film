@@ -19,7 +19,9 @@ executed through the camera's own code in the built image:
     standard set, gives its set back to Bleach Bypass's values (the guard then gives it Standard);
     damaged records are not used; no memory: the module stays out of the way;
   - RAW development (sp_raw_init / sp_raw_own / sp_raw_sync) on a substituted model: Bleach Bypass's
-    row of each base belongs to one owner, the others' values wait.
+    row of each base belongs to one owner, the others' values wait;
+  - GR Mod's film recipes (films.c -DFILM_DEFAULTS, the manifest's `filmDefaults`): wherever a film
+    starts from neutral above, it starts from its recipe's values instead; Bleach Bypass stays neutral.
 This does not establish flash persistence or the camera's menus.
 """
 import argparse,hashlib,json,random,struct
@@ -54,20 +56,30 @@ REC_WORDS=3+OWNERS+(TBYTES+3)//4+1
 RAW_POS=[0,1,2,3,4,5,6,8,13,14]
 # GR IV's Toning states (aspect/halation-ui.ts HALATION_STATES): (on, strength 0..2, white).
 STATES=[(0,0,0),(1,0,0),(1,2,0),(1,1,0),(1,0,1),(1,1,1),(1,2,1),(0,1,0),(0,2,0),(0,0,1),(0,1,1),(0,2,1)]
+# GR Mod's Grain row (films.c GRAIN_ROW, manifest 'grainRow'): gold (colour 2) on 12..14, off 15..17; the
+# Toning byte is h + 18 g (g the grain, 0..3), 0..71. The Colour line's position: red 0, gold 1, white 2.
+GOLD_STATES=[(1,0,2),(1,1,2),(1,2,2),(0,0,2),(0,1,2),(0,2,2),(1,0,3),(1,1,3),(1,2,3),(0,0,3),(0,1,3),(0,2,3)]   # gold 12..17, orange 18..23
+GRAIN={'on':False}
+def toning_max():return 95 if GRAIN['on'] else 11
+def states():return STATES+GOLD_STATES if GRAIN['on'] else STATES
+POSITION_OF=[0,3,2,1];COLOUR_AT=[0,3,2,1]   # colours red 0, white 1, gold 2, orange 3; positions red, orange, gold, white
 
 def look_at(c):return 0x1c2+2*c if c<3 else 0x57e+2*(c-3)
 def checksum(words):
     total=0x6a09e667
     for i,w in enumerate(words):total=(((total^w)*0x01000193)+i)&0xffffffff
     return total
+def split(b):
+    b=b if b<=toning_max() else 0
+    return (b%24,b//24) if GRAIN['on'] else (b,0)
 def decode(state):
-    on,s,w=STATES[state] if state<=11 else (0,0,0)
+    h,_=split(state);on,s,w=states()[h]
     return (s+1 if on else 0),w
 def encode(strength,white,was):
-    was=was if was<=11 else 0
-    remembered=STATES[was][1]
-    if strength==0:return STATES.index((0,remembered,white))
-    return STATES.index((1,strength-1,white))
+    was,g=split(was)
+    remembered=states()[was][1]
+    h=states().index((0,remembered,white)) if strength==0 else states().index((1,strength-1,white))
+    return h+24*g
 
 class FilmsProbe(AdjProbe):
     def __init__(self,data,manifest):
@@ -193,9 +205,16 @@ def old_record(version,values,halation,prints=None):
 
 def verify(data,manifest,seed=1110,steps=3000):
     assert manifest.get('round10') and manifest.get('filmCount')
+    GRAIN['on']=bool(manifest.get('grainRow'))
     n=FilmsProbe(data,manifest);rng=random.Random(seed+n.n);cpu=n.uc;calls=0;films=n.n
     f=manifest['lookEntries']['films']
     prints=list(struct.unpack('<%dI'%films,cpu.mem_read(f['prints'],4*films)))
+    # The values a film starts from: its recipe's (films.c start_of) or neutral.
+    recipe=bytes(cpu.mem_read(f['filmDefaults'],films*NP)) if f.get('filmDefaults') else None
+    def start(o,c=None):
+        v=[recipe[(o-1)*NP+j] if recipe and 1<=o<=films and recipe[(o-1)*NP+j]<=(toning_max() if j==7 else 8) else NEUTRAL[j] for j in range(NP)]
+        return v if c is None else [v[j] for j in range(NP) if FIELD[j][c]]
+    recipes_rep=[list(recipe[k*NP:(k+1)*NP]) for k in range(films)] if recipe else None
     mask=struct.unpack('<I',cpu.mem_read(f['prints']+4*films,4))[0]
     hidden=set((manifest.get('lookLayout') or {}).get('hidden',[]))
     assert all(prints) and mask==sum(1<<(l-FIRST) for l in hidden if FIRST<=l<FIRST+films)
@@ -215,7 +234,7 @@ def verify(data,manifest,seed=1110,steps=3000):
     n.records(recs);state=n.boot();calls+=1
     assert state and n.loads==1 and n.allocs and not n.writes
     model=[[[recs[0][FIELD[j][c]] if FIELD[j][c] else 0 for j in range(NP)] for c in range(6)] if o==0 else
-           [[NEUTRAL[j] if FIELD[j][c] else 0 for j in range(NP)] for c in range(6)] for o in range(OWNERS)]
+           [[start(o)[j] if FIELD[j][c] else 0 for j in range(NP)] for c in range(6)] for o in range(OWNERS)]
     selected=[n.rec()[look_at(c)] for c in range(6)]
     owners=lambda:[(owner_of(l) if owner_of(l) is not None else 0) for l in selected]
     vals=lambda o,c:[model[o][c][j] for j in range(NP) if FIELD[j][c]]
@@ -230,19 +249,20 @@ def verify(data,manifest,seed=1110,steps=3000):
             counts['swaps']+=owners()[c]!=before
         elif op<0.65:
             # A setter writes a value byte of the set's owner (movie sets: in every record).
-            c=rng.randrange(6);j=rng.choice([j for j in range(NP) if FIELD[j][c]]);v=rng.randrange(9) if j!=7 else rng.randrange(12)
+            c=rng.randrange(6);j=rng.choice([j for j in range(NP) if FIELD[j][c]]);v=rng.randrange(9) if j!=7 else rng.randrange(toning_max()+1)
             for i in (range(8) if c>=3 else [0]):cpu.mem_write(RECS[i]+FIELD[j][c],bytes([v]))
             model[owners()[c]][c][j]=v;counts['edits']+=1
         elif op<0.8:
             # The Halation and Colour lines (a stray look / set / value too).
-            look=rng.choice(film_looks+[18,11,FIRST+films,255]);s=rng.choice([0,1,2,3]);what=rng.random()<0.5;v=rng.choice([0,1,2,3,4])
+            look=rng.choice(film_looks+[18,11,FIRST+films,255]);s=rng.choice([0,1,2,3]);v=rng.choice([0,1,2,3,4])
+            what=rng.choice(['hal','col','grain'] if GRAIN['on'] else ['hal','col'])
             n.toning=[]
-            n.fn('sp_hal_put' if what else 'sp_col_put',look,s,v);calls+=1
+            n.fn({'hal':'sp_hal_put','col':'sp_col_put','grain':'sp_grain_put'}[what],look,s,v);calls+=1
             o=owner_of(look)
-            if o and o>0 and s<3 and v<=(3 if what else 1):
-                was=model[o][s][7];st,w=decode(was)
-                want=encode(v,w,was) if what else encode(st,v,was)
-                if want!=(was if was<=11 else -1):
+            if o and o>0 and s<3 and v<=(3 if what!='col' else 3 if GRAIN['on'] else 1):
+                was=model[o][s][7];st,w=decode(was);h,g=split(was)
+                want=encode(v,w,was) if what=='hal' else encode(st,COLOUR_AT[v] if GRAIN['on'] else v,was) if what=='col' else h+24*v
+                if want!=(was if was<=toning_max() else -1):
                     model[o][s][7]=want;counts['halation']+=1
                     assert n.toning==([(s,want)] if owners()[s]==o else []),(n.toning,owners()[s],o)
                 else:assert not n.toning
@@ -251,9 +271,14 @@ def verify(data,manifest,seed=1110,steps=3000):
             for look in film_looks[:3]+[18,FIRST+films]:
                 for s in range(4):
                     o=owner_of(look);st,w=decode(model[o][s][7]) if o and o>0 and s<3 else (0,0)
-                    assert n.fn('sp_hal',look,s)==st and n.fn('sp_col',look,s)==w,(look,s)
+                    assert n.fn('sp_hal',look,s)==st and n.fn('sp_col',look,s)==(POSITION_OF[w] if GRAIN['on'] else w),(look,s)
                     buf=REGION+0x9000;cpu.mem_write(buf,b'\xa5'*4);n.fn('sp_hal_text',look,s,buf)
                     assert bytes(cpu.mem_read(buf,4))==[b'--\0',b'1\0\0',b'2\0\0',b'3\0\0'][st]+b'\xa5';calls+=3
+                    if GRAIN['on']:
+                        g=split(model[o][s][7])[1] if o and o>0 and s<3 else 0
+                        assert n.fn('sp_grain',look,s)==g,(look,s,g)
+                        cpu.mem_write(buf,b'\xa5'*4);n.fn('sp_grain_text',look,s,buf)
+                        assert bytes(cpu.mem_read(buf,4))==[b'--\0',b'1\0\0',b'2\0\0',b'3\0\0'][g]+b'\xa5';calls+=2
         elif op<0.9:
             # A mode recall: the owners' values to the table, the stored record into use (the guard after).
             mode=rng.randrange(7);src=bytes(n.rec(1+mode))
@@ -285,7 +310,7 @@ def verify(data,manifest,seed=1110,steps=3000):
         for look in [18]+film_looks:
             n.select(c,look);selected[c]=look;calls+=1
             assert n.fields(c)==vals(owner_of(look),c),(c,look)
-    rep=dict(counts)
+    rep=dict(counts);rep['recipes']=recipes_rep
     # 2. RAW development: Bleach Bypass's row (RAW look 9) of each base belongs to one owner.
     m=MODEL;cpu.mem_write(m,bytes(0x400))
     row=lambda b:m+0x86+b*0xdd+9*0x11
@@ -319,8 +344,8 @@ def verify(data,manifest,seed=1110,steps=3000):
     for r in recs[1:]:
         for c in range(3,6):r[look_at(c)]=11
     n.records(recs);cpu.mem_write(GAP,b'\xa5'*4);assert n.boot();calls+=1
-    assert n.fields(0)==NEUTRAL and n.fields(2,3)==NEUTRAL and n.fields(1)==[recs[0][FIELD[j][1]] for j in range(NP)]
-    n.select(4,FIRST);assert n.fields(4)==[NEUTRAL[j] for j in range(NP) if FIELD[j][4]];calls+=1
+    assert n.fields(0)==start(1) and n.fields(2,3)==start(1) and n.fields(1)==[recs[0][FIELD[j][1]] for j in range(NP)]
+    n.select(4,FIRST);assert n.fields(4)==start(1,4);calls+=1
     rep['fingerprint_neutral']=True
     # 4. A set on a film this build does not have, or a hidden film in a standard set: its fields
     # go back to Bleach Bypass's (the guard gives the set Standard after).
@@ -380,10 +405,10 @@ def verify(data,manifest,seed=1110,steps=3000):
             # The other films: the old table's values, Halation as Toning (neutral when the preset changed).
             n.select(0,FIRST+k2);calls+=1
             other=[ov[k2+1][0][j] for j in range(7)]+[halation(oh[k2][0],version)]+[ov[k2+1][0][7],ov[k2+1][0][8]]
-            assert n.fields(0)==(NEUTRAL if case=='changed' else other),(version,case)
+            assert n.fields(0)==(start(k2+1) if case=='changed' else other),(version,case)
             # Bleach Bypass its own (after a second takeover its values in the converted set are not known: neutral).
             n.select(1,BLEACH);calls+=1;assert n.fields(1)==(NEUTRAL if case=='twice' else bleach),(version,case)
-            n.select(4,FIRST+k2);assert n.fields(4)==[NEUTRAL[j] for j in range(NP) if FIELD[j][4]];calls+=1
+            n.select(4,FIRST+k2);assert n.fields(4)==start(k2+1,4);calls+=1
             # The table is written at power off; the next start uses it.
             n.writes=[];n.power_off();calls+=1;assert table_of([d for kk,d in n.writes if kk==12][-1])
             rep['taken_over_v%d_%s'%(version,case)]=True
@@ -391,14 +416,14 @@ def verify(data,manifest,seed=1110,steps=3000):
     vals0=[[[rng.randrange(9) for j in range(NP)] for c in range(6)] for o in range(OWNERS)]
     good=make_record(vals0,[0]+prints+[0]*(20-films))
     def resign(b):w=list(struct.unpack('<%dI'%REC_WORDS,b));w[-1]=checksum(w[:-1]);return struct.pack('<%dI'%REC_WORDS,*w)
-    bad=[good[:-4]+bytes([good[-4]^1])+good[-3:],good[:-4],resign(good[:4]+b'\x09'+good[5:]),resign(good[:(3+OWNERS)*4]+b'\x21'+good[(3+OWNERS)*4+1:])]
+    bad=[good[:-4]+bytes([good[-4]^1])+good[-3:],good[:-4],resign(good[:4]+b'\x09'+good[5:]),resign(good[:(3+OWNERS)*4]+bytes([96 if GRAIN['on'] else 0x21])+good[(3+OWNERS)*4+1:])]   # above the largest table byte (films.c TABLE_MAX)
     for b in bad:
         n.store={12:b};recs=fresh_records(rng,films)
         for c in range(6):recs[0][look_at(c)]=11
         for r in recs[1:]:
             for c in range(3,6):r[look_at(c)]=11
         n.records(recs);cpu.mem_write(GAP,b'\xa5'*4);assert n.boot();calls+=1
-        n.select(0,FIRST);calls+=1;assert n.fields(0)==NEUTRAL
+        n.select(0,FIRST);calls+=1;assert n.fields(0)==start(1)
     n.alloc_ok=False;n.store={};cpu.mem_write(GAP,b'\xa5'*4);assert n.boot()==0
     before=n.fields(0);n.select(0,FIRST+1);assert n.fields(0)==before;n.writes=[];n.power_off();assert not [w for w in n.writes if w[0]==12]
     assert n.fn('sp_hal',FIRST,0)==0;n.toning=[];n.fn('sp_hal_put',FIRST,0,2);assert not n.toning

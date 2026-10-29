@@ -17,7 +17,7 @@ from rear_dial_probe import DATA, MODEL, SELECTOR, USER, USERDATA
 if not __debug__:
     raise RuntimeError('Run without Python -O')
 
-SHIM = 0x54100000
+SHIM = 0x54f00000  # above the appended code (it may reach past 0x54100000)
 VALIDATE_TABLE, COMMIT_TABLE = 0x540927e8, 0x54093030
 GAMMA_GUARD, GAMMA_OBJECT = 0x5536dbf8, 0x5536dbfc
 GAMMA_BUFFERS = (0x62090000, 0x62090400, 0x62090800)
@@ -82,12 +82,13 @@ class LookProbe(AdjProbe):
             self.uc.mem_write(pointer + 0x77c, b'\x0b')
         self.queue = []
 
-    def descriptor(self, tone, toning=None):
+    def descriptor(self, tone, toning=None, hue=4):
         self.uc.mem_write(OBJECT, bytes(0x300))
         self.uc.mem_write(CONTEXT, bytes(0x9000))
         self.uc.mem_write(COMMON, bytes(0x2000))
         self.uc.mem_write(COMMON + 0x77c, bytes([tone]))
         self.uc.mem_write(COMMON + 0x77d, bytes([4]) * 6)
+        self.uc.mem_write(COMMON + 0x77e, bytes([hue]))
         if toning is not None: self.uc.mem_write(COMMON + 0x786, bytes([toning]))
         put(self.uc, CONTEXT + 0x82d0, COMMON)
         self.uc.mem_write(OUTPUT, b'\xa5' * 0x120)

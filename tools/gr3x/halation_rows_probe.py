@@ -22,6 +22,10 @@
 Round 10 (films.c): the settings are read back through the films' module, booted through the
 settings scaffold (films_probe.FilmsProbe); a film owns photo set 1 (its Halation is the field there).
 UI widgets are not drawn; the controller is a synthetic object with the fields the code reads.
+GR Mod's Grain row (manifest 'grainRow', films.c GRAIN_ROW): a third added line, kind 11 (Cross
+Processing's Toning row) as Grain Effect's for a film: its name 0x133, scale 57, four positions,
+start and position (the film's grain), value text, icon 0x1de and setter; the Colour line with kind
+10 with four positions (red, orange, gold, white) and their icons; Cancel over the whole byte (0..95).
 """
 import argparse,hashlib,json,random,struct
 from pathlib import Path
@@ -36,8 +40,15 @@ if not __debug__:raise RuntimeError('Validation requires Python assertions')
 SCALE10,POSITIONS10,START10,POSITION10,LIST_TEXT10,LIST_ICON10,SETTER10=0x531adcbc,0x531adce0,0x531adca0,0x531b0514,0x531af494,0x531af4a8,0x531b0d8c
 START15,POSITION15,LIST_TEXT15,LIST_ICON15,SETTER15=0x531ae84c,0x531b0564,0x531af6ec,0x531af700,0x531b0d28
 MAP15,MAP10=0x531ac868,0x531ac6f0
+SCALE11,POSITIONS11,START11,POSITION11,LIST_TEXT11,LIST_ICON11,SETTER11=0x531addfc,0x531ade20,0x531adde0,0x531b0524,0x531af50c,0x531af520,0x531b0d78
 NATIVE={0x532c70e4:'stored10',0x532c297c:'live10',0x532aca68:'text10',0x532c0894:'hdr',
-        0x532c9744:'stored15',0x532c2a5c:'live15',0x532ace68:'text15',0x532c1780:'particle'}
+        0x532c9744:'stored15',0x532c2a5c:'live15',0x532ace68:'text15',0x532c1780:'particle',
+        0x532c7270:'stored11',0x532c299c:'live11',0x532ad000:'text11',0x532c09a8:'cross'}
+# The Grain row's Toning byte (films.c GRAIN_ROW): h + 18 g; h's strength and colour position (red 0, gold 1, white 2).
+def hal_of(v):
+    h=v%24 if v<=95 else 0
+    st=[0,1,3,2,1,2,3,0,0,0,0,0,1,2,3,0,0,0,1,2,3,0,0,0][h];co=[0,0,0,0,3,3,3,0,0,3,3,3,2,2,2,2,2,2,1,1,1,1,1,1][h]
+    return st,co,(v//24 if v<=95 else 0)
 
 class RowsProbe(ScreenProbe):
     def _hook(self,cpu,at,size,user):
@@ -79,8 +90,13 @@ def verify(data,manifest):
     n=(RowsProbe10 if r10 else RowsProbe)(data,manifest);c=n.uc;orig=lambda a,k:data[a-0x53000000:a-0x53000000+k]
     film=lambda look:64<=look<64+films
     cols,icons=manifest['catalogs']['textColumns'],manifest['catalogs']['iconCount']
-    hal_text,col_text=cols-2,cols-1
-    hal_icon,col_scale,red_icon,white_icon=icons-4,icons-3,icons-2,icons-1
+    G=bool(manifest.get('grainRow'))
+    # The teal sky builds: the films' Hue row is named "Teal Sky" and has its own icon (text and icon last).
+    T=bool(manifest['lookEntries'].get('films',{}).get('tealHue'))
+    hal_text,col_text,teal_text=(cols-3,cols-2,cols-1) if T else (cols-2,cols-1,None)
+    k=4+(2 if G else 0)+(1 if T else 0)
+    hal_icon,col_scale,red_icon,white_icon=icons-k,icons-k+1,icons-k+2,icons-k+3
+    gold_icon,orange_icon,teal_icon=icons-k+4,icons-k+5,icons-1
     # 1. The table.
     table=None
     for lo,hi,r in SITES:
@@ -90,9 +106,24 @@ def verify(data,manifest):
     entries=[struct.unpack('<2I',bytes(c.mem_read(table+8*k,8))) for k in range(39)]
     def items(k):p,cnt=entries[k];return [tuple(c.mem_read(p+2*i,2)) for i in range(cnt)]
     std=[items(0),items(12),items(24)]
-    for s in range(3):assert items(36+s)==std[s]+[(0,15),(0,10)],s
-    assert items(37)==items(38) and all(k not in (10,15) for _,k in items(0))
+    for s in range(3):assert items(36+s)==std[s]+([(0,11)] if G else [])+[(0,15),(0,10)],s
+    assert items(37)==items(38) and all(k not in (10,11,15) for _,k in items(0))
     report['table']=dict(entries=39,film_lines=[len(items(36+s)) for s in range(3)])
+    if G:
+        # The screen's number of lines (0x531afbe0): after its loop over the camera's looks (most
+        # lines, at +0x19e), the films' lines count too: the hook from 0x531afc48 to the allocation.
+        for movie in (0,1):
+            for look in (11,64,64+films-1,20):
+                n.controller(look,0,movie);most=0
+                for s in range(3):
+                    for col in range(12):most=max(most,n.call(LINE_COUNT,CTL,s,col))
+                c.mem_write(CTL+0x19e,bytes([most]))
+                out,vals=n.site_to(0x531afc48,0x531afc4c,{5:CTL});calls+=1
+                want=max([most]+[n.call(LINE_COUNT,CTL,s,36-11*s) for s in range(3)])
+                assert out[0]==want==c.mem_read(CTL+0x19e,1)[0],(look,movie,out[0],want)
+                if movie==0:
+                    assert want==max(len(items(36+s)) for s in range(3))>most,(want,most)
+                    report['screen_lines']=dict(camera_looks=most,with_films=want)
     # 2. Base column, every look, every set, both movie flags (the asserts only log).
     columns=0
     for movie in (0,1):
@@ -111,11 +142,12 @@ def verify(data,manifest):
             n.controller(64,s,movie)
             for line in range(len(std[s])):
                 assert n.call(IS_VALID,CTL,s,fc,line)==n.call(IS_VALID,CTL,s,sc,line);calls+=2
-            added=[n.call(IS_VALID,CTL,s,fc,len(std[s])+k) for k in (0,1)];calls+=2
-            assert added==([1,1] if movie==0 else [0,0]),(s,movie,added)
+            kinds=[11,15,10] if G else [15,10]
+            added=[n.call(IS_VALID,CTL,s,fc,len(std[s])+k) for k in range(len(kinds))];calls+=len(kinds)
+            assert added==([1]*len(kinds) if movie==0 else [0]*len(kinds)),(s,movie,added)
             assert n.call(LINE_COUNT,CTL,s,fc)-n.call(LINE_COUNT,CTL,s,sc)==sum(added);calls+=2
             c.mem_write(CTL+0x19a,bytes([fc]))
-            for k,kind in ((0,15),(1,10)):n.focus=len(std[s])+k;assert n.call(CURRENT_KIND,CTL)==kind;calls+=1
+            for k,kind in enumerate(kinds):n.focus=len(std[s])+k;assert n.call(CURRENT_KIND,CTL)==kind;calls+=1
     # 4. Hooks, with settings read back through slots3.c itself.
     if r10:
         recs=fresh_records(random.Random(5),films)
@@ -129,9 +161,11 @@ def verify(data,manifest):
         assert n.boot();calls+=1
         own=manifest['lookEntries']['ownParameters'];fn=lambda name:own['module']+own['exports'][name]
     strength=lambda look,s:(look*7+s*5)%4
-    colour=lambda look,s:(look+s)%2
+    colour=lambda look,s:(look+s)%(4 if G else 2)
+    grain=lambda look,s:(look*3+s)%4 if G else 0
     def restore(look,s):
         n.call(fn('sp_hal_put'),look,s,strength(look,s));n.call(fn('sp_col_put'),look,s,colour(look,s))
+        if G:n.call(fn('sp_grain_put'),look,s,grain(look,s))
     for look in range(64,64+films):
         for s in range(3):restore(look,s);calls+=2
     looks=list(range(0,24))+list(range(60,90))+[255]
@@ -141,14 +175,18 @@ def verify(data,manifest):
             isfilm=film(look)
             st=strength(look,s) if isfilm and s<3 else 0
             co=colour(look,s) if isfilm and s<3 else 0
+            gr=grain(look,s) if isfilm and s<3 else 0
             n.controller(look,s)
             # Names: Halation (kind 15) and Colour (kind 10) for a film, the official text otherwise.
-            for kind in (7,9,10,13,14,15,17):
+            for kind in (1,7,9,10,11,13,14,15,17):
                 for flags in (0,15):
                     out,vals,f=n.site(SUBTITLE,{0:kind,3:SUBTITLE_TABLE+kind*4,4:CTL},flags);calls+=1
                     official=struct.unpack('<H',orig(SUBTITLE_TABLE+kind*4+2,2))[0]
-                    want=hal_text if kind==15 and isfilm else col_text if kind==10 and isfilm else official
+                    want=hal_text if kind==15 and isfilm else col_text if kind==10 and isfilm else 0x133 if kind==11 and isfilm and G else teal_text if kind==1 and isfilm and T else official
                     assert out[1]==want,(look,kind) ;assert out[0]==kind and out[2:4]==vals[2:4];hooks+=1
+            # ---- Teal sky (kind 1, Hue): its list icon
+            out,vals=n.site_to(0x531af070,0x531af074,{0:0x111,2:0x222,6:CTL})
+            assert out[1]==(teal_icon if isfilm and T else 0x1e1) and (out[0],out[2])==(0x111,0x222);hooks+=1
             # ---- Halation (kind 15)
             for at,ctl,kind in ((START15,6,'stored15'),(POSITION15,5,'live15')):
                 out,vals=n.site_to(at,at+4,{0:0x6205c000,1:look,ctl:CTL});calls+=1
@@ -167,17 +205,19 @@ def verify(data,manifest):
                 out,vals=n.site_to(SETTER15,SETTER15+4,{0:0x6205c000,1:[0,3,2,1][pos],4:CTL,6:pos});calls+=1
                 if isfilm:
                     assert not n.native and n.call(fn('sp_hal'),look,s)==(pos if s<3 else 0) and n.call(fn('sp_col'),look,s)==co
+                    if G:assert n.call(fn('sp_grain'),look,s)==gr
                     restore(look,s)
                 else:assert n.native==[('particle',0x6205c000,[0,3,2,1][pos])]
                 hooks+=1
             # ---- Colour (kind 10)
             out,vals=n.site_to(SCALE10,SCALE10+4,{6:CTL});assert out[3]==(col_scale if isfilm else 0xd3) and out[:3]==vals[:3];hooks+=1
-            out,vals=n.site_to(POSITIONS10,POSITIONS10+8,{6:CTL});assert (out[2],out[3])==((1,0x168) if isfilm else (2,0xb4)) and out[:2]==vals[:2];hooks+=1
+            out,vals=n.site_to(POSITIONS10,POSITIONS10+8,{6:CTL});assert (out[2],out[3])==(((3,0x78) if G else (1,0x168)) if isfilm else (2,0xb4)) and out[:2]==vals[:2];hooks+=1
             for at,ctl,kind in ((START10,6,'stored10'),(POSITION10,5,'live10')):
-                out,vals=n.site_to(at,at+4,{0:0x6205c000,1:look,ctl:CTL});calls+=1
+                # Four positions: a film's position comes back past the map (at + 8).
+                out,vals=n.site_to(at,at+(8 if isfilm and G else 4),{0:0x6205c000,1:look,ctl:CTL});calls+=1
                 if isfilm:
                     assert out[0]==co and not n.native,(look,s)
-                    assert n.call(MAP10,out[0])==co;calls+=1
+                    if not G:assert n.call(MAP10,out[0])==co;calls+=1
                 else:assert out[0]==0x7777 and n.native==[(kind,0x6205c000,look)]
                 hooks+=1
             c.mem_write(buf,b'\xa5'*4)
@@ -186,14 +226,39 @@ def verify(data,manifest):
             else:assert n.native==[('text10',0x62049000,buf)]
             hooks+=1
             out,vals=n.site_to(LIST_ICON10,LIST_ICON10+4,{0:0x111,2:0x222,6:CTL})
-            assert out[1]==((white_icon if co else red_icon) if isfilm else 0x1e9) and (out[0],out[2])==(0x111,0x222);hooks+=1
-            for v in (0,1,2):
-                out,vals=n.site_to(SETTER10,SETTER10+4,{0:0x6205c000,1:v,4:CTL});calls+=1
+            icon=([red_icon,orange_icon,gold_icon,white_icon][co] if G else white_icon if co else red_icon) if isfilm else 0x1e9
+            assert out[1]==icon and (out[0],out[2])==(0x111,0x222);hooks+=1
+            for v in ((0,1,2,3) if G else (0,1,2)):
+                # (r1 the native value of the position, [0, 1, 2, 0]; r6 the position.)
+                out,vals=n.site_to(SETTER10,SETTER10+4,{0:0x6205c000,1:[0,1,2,0][v],4:CTL,6:v});calls+=1
                 if isfilm:
-                    assert not n.native and n.call(fn('sp_col'),look,s)==((v if v<2 else co) if s<3 else 0) and n.call(fn('sp_hal'),look,s)==st
+                    assert not n.native and n.call(fn('sp_col'),look,s)==((v if v<2 or G else co) if s<3 else 0) and n.call(fn('sp_hal'),look,s)==st
                     restore(look,s)
-                else:assert n.native==[('hdr',0x6205c000,v)]
+                else:assert n.native==[('hdr',0x6205c000,[0,1,2,0][v])]
                 hooks+=1
+            # ---- Grain (kind 11, the Grain row)
+            if G:
+                out,vals=n.site_to(SCALE11,SCALE11+4,{6:CTL});assert out[3]==(0x39 if isfilm else 0x33) and out[:3]==vals[:3];hooks+=1
+                out,vals=n.site_to(POSITIONS11,POSITIONS11+8,{6:CTL});assert (out[2],out[3])==((3,0x78) if isfilm else (2,0xb4)) and out[:2]==vals[:2];hooks+=1
+                for at,ctl,kind in ((START11,6,'stored11'),(POSITION11,5,'live11')):
+                    out,vals=n.site_to(at,at+(8 if isfilm else 4),{0:0x6205c000,1:look,ctl:CTL});calls+=1
+                    if isfilm:assert out[0]==gr and not n.native,(look,s)
+                    else:assert out[0]==0x7777 and n.native==[(kind,0x6205c000,look)]
+                    hooks+=1
+                c.mem_write(buf,b'\xa5'*4)
+                out,vals=n.site_to(LIST_TEXT11,LIST_TEXT11+4,{0:0x62049000,1:buf,7:CTL})
+                if isfilm:assert bytes(c.mem_read(buf,4))==[b'--\0',b'1\0\0',b'2\0\0',b'3\0\0'][gr]+b'\xa5' and not n.native
+                else:assert n.native==[('text11',0x62049000,buf)]
+                hooks+=1
+                out,vals=n.site_to(LIST_ICON11,LIST_ICON11+4,{0:0x111,2:0x222,7:CTL});assert out[1]==(0x1de if isfilm else 0x1e9) and (out[0],out[2])==(0x111,0x222);hooks+=1
+                for pos in range(4):
+                    out,vals=n.site_to(SETTER11,SETTER11+4,{0:0x6205c000,1:[0,1,2,0][pos],4:CTL,6:pos});calls+=1
+                    if isfilm:
+                        assert not n.native and n.call(fn('sp_grain'),look,s)==(pos if s<3 else 0)
+                        assert n.call(fn('sp_hal'),look,s)==st and n.call(fn('sp_col'),look,s)==co
+                        restore(look,s)
+                    else:assert n.native==[('cross',0x6205c000,[0,1,2,0][pos])]
+                    hooks+=1
     report['hook_cases']=hooks
     if r10:
         # Cancel (round 10): no thunks; the screen backs the Toning byte up with the other parameters
@@ -206,7 +271,7 @@ def verify(data,manifest):
         obj=REGION+0xa800;restores=0
         for look in (64,64+films-1,18,11,12,64+films,255):
             for s in range(3):
-                for v in range(12):
+                for v in range(96 if G else 12):
                     c.mem_write(obj,bytes(0x40))
                     n.restoring=(look,s);n.toning=[]
                     n.call(TONING_RESTORE,obj,v);calls+=1;n.restoring=None
@@ -214,8 +279,12 @@ def verify(data,manifest):
                     assert n.toning==want,(look,s,v,n.toning);restores+=1
                     if film(look) and s==1 and look==64:
                         assert c.mem_read(RECS[0]+FIELD[7][1],1)[0]==v
-                        st=[0,1,3,2,1,2,3,0,0,0,0,0][v];co=[0,0,0,0,1,1,1,0,0,1,1,1][v]
-                        assert n.call(fn('sp_hal'),64,1)==st and n.call(fn('sp_col'),64,1)==co;calls+=2
+                        if G:
+                            st,co,g=hal_of(v)
+                            assert n.call(fn('sp_hal'),64,1)==st and n.call(fn('sp_col'),64,1)==co and n.call(fn('sp_grain'),64,1)==g,v;calls+=3
+                        else:
+                            st=[0,1,3,2,1,2,3,0,0,0,0,0][v];co=[0,0,0,0,1,1,1,0,0,1,1,1][v]
+                            assert n.call(fn('sp_hal'),64,1)==st and n.call(fn('sp_col'),64,1)==co;calls+=2
         restore(64,1)
         report['cancel_restores']=restores
         return dict(schema=1,rtos_sha256=hashlib.sha256(data).hexdigest(),films=films,calls=calls,**report,hardware_tested=False,

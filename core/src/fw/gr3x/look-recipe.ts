@@ -3,6 +3,7 @@
 // exact official image and requires byte identity before trusting a T5 file.
 import { FirmwareError } from '../types';
 import type { Gr3xLookOptions } from './image-control';
+import { gr3xCanonicalDefaults, validateGr3xFilmDefaults, validateGr3xGrain } from './film-recipe';
 export const GR3X_RECIPE_MAGIC = new TextEncoder().encode('GR3X-T5-RECIPE\0');
 /** Round 6: twenty films with their icons and curves take about 0.55 MB of JSON. */
 const RECIPE_MAX = 1500000;
@@ -14,6 +15,9 @@ export function encodeGr3xLookRecipe(options: Gr3xLookOptions): Uint8Array {
     ...(options.jpegDiagnostics === true ? { jpegDiagnostics: true } : {}),
     // Round 6: the number of films (1..20) and the in-camera Halation; absent in T6 (nine).
     ...(options.filmCount !== undefined ? { filmCount: options.filmCount } : {}),
+    // GR Mod's film recipes: a film's Hue is its teal sky (only when set: other recipes unchanged).
+    ...(options.tealHue === true ? { tealHue: true } : {}),
+    ...(options.grainRow === true ? { grainRow: true } : {}),
     films: (options.films ?? []).map(f => ({
       name: f.name,
       ...(f.names && Object.keys(f.names).length ? { names: f.names } : {}),
@@ -22,6 +26,9 @@ export function encodeGr3xLookRecipe(options: Gr3xLookOptions): Uint8Array {
       ...(f.preset ? { preset: { matrixQ13: Array.from(f.preset.matrixQ13), curves: f.preset.curves.map(c => Array.from(c)),
         ...(f.preset.postQ9 ? { postQ9: Array.from(f.preset.postQ9) } : {}) } } : {}),
       ...(f.halation ? { halation: f.halation } : {}),
+      // GR Mod's film recipes (round 10): only when used, so other recipes stay byte-identical.
+      ...(gr3xCanonicalDefaults(f.defaults) ? { defaults: gr3xCanonicalDefaults(f.defaults) } : {}),
+      ...(f.grain && f.grain.amount ? { grain: { amount: f.grain.amount, size: f.grain.size } } : {}),
     })),
   };
   const data = new TextEncoder().encode(JSON.stringify(recipe));
@@ -48,15 +55,20 @@ export function readGr3xLookRecipe(appendedRtos: Uint8Array): Gr3xLookOptions | 
         (r.jpegDiagnostics !== undefined && r.jpegDiagnostics !== true))
       throw new FirmwareError('bad-edit', 'invalid IIIx recipe');
     return { displayRevision: r.schema, monoReplicas: r.monoReplicas, ...(r.ownParameters ? { ownParameters: true } : {}),
-      ...(r.jpegDiagnostics ? { jpegDiagnostics: true } : {}), ...(r.filmCount !== undefined ? { filmCount: r.filmCount } : {}), films: r.films.map((f: Record<string, any>) => {
+      ...(r.jpegDiagnostics ? { jpegDiagnostics: true } : {}), ...(r.filmCount !== undefined ? { filmCount: r.filmCount } : {}),
+      ...(r.tealHue === true && r.filmCount !== undefined ? { tealHue: true } : {}),
+      ...(r.grainRow === true && r.filmCount !== undefined ? { grainRow: true } : {}), films: r.films.map((f: Record<string, any>) => {
       if (typeof f.name !== 'string' || (f.icon && (!Array.isArray(f.icon) || f.icon.length !== 6400 ||
           f.icon.some((v: number) => !Number.isInteger(v) || v < 0 || v > 255))))
         throw new FirmwareError('bad-edit', 'invalid IIIx recipe slot');
       if (f.names !== undefined && (typeof f.names !== 'object' || Object.values(f.names).some(v => typeof v !== 'string')))
         throw new FirmwareError('bad-edit', 'invalid IIIx recipe names');
       if (f.halation !== undefined && (![1, 2].includes(f.halation) || r.filmCount !== undefined)) throw new FirmwareError('bad-edit', 'invalid IIIx recipe halation');
+      if ((f.defaults !== undefined || f.grain !== undefined) && r.filmCount === undefined) throw new FirmwareError('bad-edit', 'invalid IIIx film recipe');
+      validateGr3xFilmDefaults(f.defaults); validateGr3xGrain(f.grain);
       return { name: f.name, ...(f.names ? { names: f.names } : {}), ...(f.icon ? { icon: Uint8Array.from(f.icon) } : {}),
-        ...(f.params ? { params: f.params } : {}), ...(f.preset ? { preset: f.preset } : {}), ...(f.halation ? { halation: f.halation } : {}) };
+        ...(f.params ? { params: f.params } : {}), ...(f.preset ? { preset: f.preset } : {}), ...(f.halation ? { halation: f.halation } : {}),
+        ...(f.defaults ? { defaults: f.defaults } : {}), ...(f.grain ? { grain: f.grain } : {}) };
     }) };
   }
   return null;

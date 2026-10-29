@@ -57,10 +57,14 @@ export const HALATION = {
   channels: [1, 0.06, 0.03] as const,
   /** White (0.8.2, chosen on the camera): every channel lifted alike, a soft white bloom like the GR IV HDF's highlight diffusion. */
   white: [0.6, 0.6, 0.6] as const,
+  /** Gold (GR III's third colour, chosen on the camera): red and most of the green, a golden-yellow glow. */
+  gold: [1, 0.82, 0.08] as const,
+  /** Orange (GR III's fourth colour): between red and gold. */
+  orange: [1, 0.42, 0.05] as const,
 };
 
-/** Colour of the glow: red (film halation) or white (highlight diffusion). */
-export type HalationColour = 'red' | 'white';
+/** Colour of the glow: red (film halation), white (highlight diffusion) or gold (GR III's third colour). */
+export type HalationColour = 'red' | 'white' | 'gold' | 'orange';
 
 
 /** JpegEncodeMacroProcess::Execute. */
@@ -168,7 +172,7 @@ export function halationLut(colour: HalationColour = 'red'): Uint8Array {
   const cached = lutCache[colour];
   if (cached) return cached;
   const out = new Uint8Array(3 * LUT_N);
-  (colour === 'white' ? HALATION.white : HALATION.channels).forEach((wc, c) => {
+  (colour === 'white' ? HALATION.white : colour === 'gold' ? HALATION.gold : colour === 'orange' ? HALATION.orange : HALATION.channels).forEach((wc, c) => {
     for (let i = 0; i < LUT_N; i++) out[c * LUT_N + i] = Math.round(255 * (1 - Math.exp(-(i / 64) * wc)));
   });
   lutCache[colour] = out;
@@ -307,6 +311,8 @@ function cover(x: number, y: number, cx: number, cy: number, r0: number, r1: num
 }
 
 const RED: [number, number, number] = [255, 84, 40];
+const GOLD: [number, number, number] = [255, 196, 36];
+const ORANGE: [number, number, number] = [255, 138, 30];
 
 /** A light with a red ring: the list icon of the parameter (40 x 40, like the other parameters). */
 export function halationIcon(): Uint8Array {
@@ -322,9 +328,10 @@ export function halationIcon(): Uint8Array {
 /**
  * The colour slider's scale in the Halation submenu (400 x 60, as the native ones): the panel and the
  * track of `native` (the two-position Off / On scale 0x3A), its labels replaced by a red and a white
- * light at x = 20 and 380 (the two positions).
+ * light at x = 20 and 380 (the two positions); with `gold` an orange and a gold light between them,
+ * at x = 140 and 260 (GR III's four positions: red, orange, gold, white).
  */
-export function halationColourScale(native: Uint8Array): Uint8Array {
+export function halationColourScale(native: Uint8Array, gold = false): Uint8Array {
   if (native.length !== 400 * 60 * 4) fail('unexpected-layout', 'halation: the native scale has another size');
   const base = native.slice();
   // Clear the labels (above the track): back to the panel colour.
@@ -333,7 +340,7 @@ export function halationColourScale(native: Uint8Array): Uint8Array {
     base[i] = 0; base[i + 1] = 0; base[i + 2] = 0; base[i + 3] = 191;
   }
   return render(400, 60, (x, y) => {
-    for (const [cx, colour] of [[20, RED], [380, [255, 255, 255]]] as const) {
+    for (const [cx, colour] of (gold ? [[20, RED], [140, ORANGE], [260, GOLD], [380, [255, 255, 255]]] : [[20, RED], [380, [255, 255, 255]]]) as readonly (readonly [number, readonly number[]])[]) {
       const c = cover(x, y, cx, 17, 0, 7);
       if (c) return [...colour, Math.round(255 * c)] as [number, number, number, number];
     }
@@ -341,9 +348,9 @@ export function halationColourScale(native: Uint8Array): Uint8Array {
   }, base);
 }
 
-/** The colour row's icon in the Halation submenu (40 x 40): a red or a white light. */
+/** The colour row's icon in the Halation submenu (40 x 40): a red, white, gold or orange light. */
 export function halationColourIcon(colour: HalationColour): Uint8Array {
-  const rgb: readonly [number, number, number] = colour === 'white' ? [255, 255, 255] : RED;
+  const rgb: readonly [number, number, number] = colour === 'white' ? [255, 255, 255] : colour === 'gold' ? GOLD : colour === 'orange' ? ORANGE : RED;
   return render(40, 40, (x, y) => {
     const c = cover(x, y, 20, 20, 0, 13);
     return c ? [...rgb, Math.round(255 * c)] : null;
@@ -361,6 +368,23 @@ export const HALATION_NAMES: readonly string[] = [
   'Halation', 'Halation', 'Halation', 'Halation', 'Halation', 'Halation', 'Halation', 'Ореол', '할레이션', '光暈',
   '光晕', 'Halation',
 ];
+
+/** GR III films' Hue row when it is their teal sky (image-control.ts tealHue), per row of the text catalog (as `HALATION_NAMES`). */
+export const TEAL_SKY_NAMES: readonly string[] = [
+  'ティールスカイ', 'Teal Sky', 'Ciel sarcelle', 'Petrolhimmel', 'Cielo turquesa', 'Céu turquesa', 'Cielo ottanio', 'Groenblauwe lucht', 'Petrolblå himmel',
+  'Petrolblå himmel', 'Sinivihreä taivas', 'Morskie niebo', 'Tyrkysové nebe', 'Türkiz ég', 'Camgöbeği gök', 'Πετρόλ ουρανός', 'Бирюзовое небо', '틸 스카이', '天空青色',
+  '天空青色', 'ฟ้าเขียวหัวเป็ด',
+];
+
+/** The teal sky row's list icon (40 x 40): a teal sky disc with a white cloud. */
+export function tealSkyIcon(): Uint8Array {
+  return render(40, 40, (x, y) => {
+    const cloud = Math.max(cover(x, y, 17, 25, 0, 5), cover(x, y, 23, 23, 0, 6.5), cover(x, y, 29, 26, 0, 4.5));
+    if (cloud) return [255, 255, 255, Math.round(255 * cloud)];
+    const sky = cover(x, y, 20, 20, 0, 15);
+    return sky ? [32, 178, 170, Math.round(255 * sky)] : null;
+  });
+}
 
 /** The colour row's name in the Halation submenu, per row of the text catalog (as `HALATION_NAMES`). */
 export const HALATION_COLOUR_NAMES: readonly string[] = [
@@ -381,7 +405,7 @@ const lift = (v: number, h: number): number => v + Math.floor(((255 - v) * h * 2
  */
 export function halateYcc(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight = PLAIN_LIGHT, colour: HalationColour = 'red'): void {
   if (colour === 'white') halateYccWhite(Y, C, w, h, level, light);
-  else halateYccRed(Y, C, w, h, level, light);
+  else halateYccRed(Y, C, w, h, level, light, colour);
 }
 
 /**
@@ -497,13 +521,13 @@ function halateYccWhite(Y: Uint8Array, C: Uint8Array, w: number, h: number, leve
   }
 }
 
-function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight): void {
+function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight, colour: 'red' | 'gold' | 'orange' = 'red'): void {
   const P = paramBytes();
   const v = new DataView(P.buffer);
   const tab = light.table;
   const narrow = v.getUint16(0, true), wideR = v.getUint16(2, true), mix = v.getUint16(4, true);
   const gain = halationGains()[level - 1];
-  const lut = halationLut('red');
+  const lut = halationLut(colour);
   let s = 0;
   while ((w >>> s) > 1024 || (h >>> s) > 1024) s++;
   const F = 1 << s;

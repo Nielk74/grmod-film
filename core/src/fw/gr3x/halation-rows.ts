@@ -25,6 +25,19 @@
  *    r6], SetParticle 0x532c1780 at 0x531b0d28);
  *  - kind 10 (HDR Tone's Toning): builder 0x531adc6c (positions `mov r2,#2; mov r3,#0xb4` at
  *    0x531adce0, scale 0xd3 at 0x531adcbc), the rest as in round 6.
+ *
+ * GR Mod's Grain row (round 10, films.c GRAIN_ROW): a third added row, "Grain Effect", before the
+ * Halation, set in the camera like GR III's own Grain Effect (Off / 1 / 2 / 3, its name 0x133, icon,
+ * scale 57 and four positions), for the films' grain (GR Mod's grain module). GR III's only
+ * four-position row is Grain Effect's own, which the Halation row is, so the Grain row is Cross
+ * Processing's Toning row (kind 11, three positions, scale 0x33) made into Grain Effect's for a film,
+ * as the Colour row is HDR Tone's. Read from the official 2.10 code:
+ *  - kind 11: builder 0x531addac (start: getter 0x532c7270 at 0x531adde0, then the map 0x531ac74c;
+ *    scale 0x33 at 0x531addfc; positions `mov r2,#2; mov r3,#0xb4` at 0x531ade20; controller r6),
+ *    position 0x531b0524 (getter 0x532c299c, map; controller r5), list line 0x531af4cc (controller
+ *    r7: text 0x532ad000 at 0x531af50c into r5's buffer, icon 0x1e9 at 0x531af520), setter case
+ *    0x531b0d6c (Cross Processing's setter 0x532c09a8 at 0x531b0d78; position r6, controller r4).
+ * And the Colour row gets four positions (Grain Effect's count and spacing): red, orange, gold, white.
  */
 import { branchWord, movWord } from '../aspect/arm';
 import { FirmwareError } from '../types';
@@ -44,6 +57,15 @@ const STORED_GETTER10 = 0x532c70e4, LIVE_GETTER10 = 0x532c297c, TEXT10 = 0x532ac
 const START15 = 0x531ae84c, POSITION15 = 0x531b0564, LIST_TEXT15 = 0x531af6ec, LIST_ICON15 = 0x531af700, SETTER15 = 0x531b0d28;
 const STORED_GETTER15 = 0x532c9744, LIVE_GETTER15 = 0x532c2a5c, TEXT15 = 0x532ace68, PARTICLE_SETTER = 0x532c1780;
 const GRAIN_ICON = 0x1de, TONING_ICON = 0x1e9, TONING_SCALE = 0xd3;
+// Kind 11 (Grain, GR Mod's Grain row).
+const KIND_CROSS = 11, START11 = 0x531adde0, SCALE11 = 0x531addfc, POSITIONS11 = 0x531ade20, POSITION11 = 0x531b0524;
+const LIST_TEXT11 = 0x531af50c, LIST_ICON11 = 0x531af520, SETTER11 = 0x531b0d78;
+const STORED_GETTER11 = 0x532c7270, LIVE_GETTER11 = 0x532c299c, MAP11 = 0x531ac74c, TEXT11 = 0x532ad000, CROSS_SETTER = 0x532c09a8;
+const GRAIN_TEXT = 0x133, GRAIN_SCALE = 0x39, CROSS_SCALE = 0x33;
+// The screen's lines (made at 0x531afbe0): their number at +0x19e after the loop over the looks; the line count 0x531afab8.
+const LINES_SIZE = 0x531afc48, LINE_COUNT = 0x531afab8;
+// Kind 1 (Hue): its list line's icon 0x1e1 at 0x531af070 (controller r6, the list in r0, r2 the value text).
+const KIND_HUE = 1, LIST_ICON1 = 0x531af070, HUE_ICON = 0x1e1;
 const BACKUP = 0x532c337c, BACKUP_BODY = 0x532c325c, RESTORE = 0x532c34a8, RESTORE_BODY = 0x532c33c8;
 
 export interface Gr3xHalationRowsProgram {
@@ -62,6 +84,12 @@ export interface Gr3xHalationRowsOptions {
   /** Rounds 7..9: the settings kept and put back with the screen's own (round 10: the Toning byte is
    * one of the parameters the screen backs up and restores itself). */
   backup?: number; restore?: number;
+  /** GR Mod's Grain row (films.c GRAIN_ROW: sp_grain / sp_grain_put / sp_grain_text): the Grain row,
+   * and the Colour row with four positions (red, orange, gold, white: `colourScale` has the four lights). */
+  grain?: { get: number; put: number; text: number };
+  goldIcon?: number; orangeIcon?: number;
+  /** The films' Hue row as their teal sky (image-control.ts tealHue): its name and list icon. */
+  teal?: { text: number; icon: number };
 }
 
 const bl = (at: number, target: number) => (0xeb000000 | (((target - (at + 8)) >> 2) & 0xffffff)) >>> 0;
@@ -77,7 +105,7 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
     [SUBTITLE, 0xe1d310b2], [SUBTITLE - 0x14, 0xe3520001],
     // Kind 10.
     [SCALE10, 0xe3a030d3], [POSITIONS10, 0xe3a02002], [POSITIONS10 + 4, 0xe3a030b4], [POSITIONS10 + 8, 0xe24b0054],
-    [START10, bl(START10, STORED_GETTER10)], [START10 + 4, bl(START10 + 4, 0x531ac6f0)], [POSITION10, bl(POSITION10, LIVE_GETTER10)],
+    [START10, bl(START10, STORED_GETTER10)], [START10 + 4, bl(START10 + 4, 0x531ac6f0)], [START10 + 8, 0xe58d4004], [POSITION10, bl(POSITION10, LIVE_GETTER10)], [POSITION10 + 8, 0xe1a04000],
     [LIST_TEXT10, bl(LIST_TEXT10, TEXT10)], [LIST_ICON10, movWord(1, TONING_ICON)], [SETTER10, bl(SETTER10, HDR_SETTER)],
     [SETTER10 - 0xc, 0xe30e3bc4], [SETTER10 - 8, 0xe34533b4], [SETTER10 - 4, 0xe7d31006],
     // Kind 15.
@@ -99,11 +127,12 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
   const list = (entry: number) => {
     const at = ov.getUint32(entry * 8, true), count = ov.getUint32(entry * 8 + 4, true);
     const items = p.read(at, count * 2);
-    for (let k = 0; k < count; k++) if (items[2 * k + 1] === KIND_TONING || items[2 * k + 1] === KIND_GRAIN) fail('Standard already has kind 10 or 15');
-    return Uint8Array.from([...items, 0, KIND_GRAIN, 0, KIND_TONING]);
+    for (let k = 0; k < count; k++) if ([KIND_TONING, KIND_GRAIN, KIND_CROSS].includes(items[2 * k + 1])) fail('Standard already has kind 10, 11 or 15');
+    return Uint8Array.from([...items, ...(o.grain ? [0, KIND_CROSS] : []), 0, KIND_GRAIN, 0, KIND_TONING]);
   };
   const set0 = list(0), set12 = list(12);
-  if (set0.length !== 22 || set12.length !== 24 || set12[1] !== 17 || ov.getUint32(12 * 8, true) !== ov.getUint32(24 * 8, true)) fail('Standard lines');
+  const added = o.grain ? 2 : 0;
+  if (set0.length !== 22 + added || set12.length !== 24 + added || set12[1] !== 17 || ov.getUint32(12 * 8, true) !== ov.getUint32(24 * 8, true)) fail('Standard lines');
   const l0 = p.append(set0), l12 = p.append(set12);
   const extra = new Uint8Array(24), ev = new DataView(extra.buffer);
   [[l0, set0.length / 2], [l12, set12.length / 2], [l12, set12.length / 2]].forEach(([a, c], k) => { ev.setUint32(k * 8, a, true); ev.setUint32(k * 8 + 4, c, true); });
@@ -117,9 +146,9 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
     cmp r0,#1;moveq r0,#25;movhi r0,#14;movlo r0,#36;b #${BASE_RETURN};native:b #${BASE_DEFAULT_TARGET};`);
   p.patch(BASE_DEFAULT, 0xea000024, branchWord(BASE_DEFAULT, base), 'halation: a film\'s parameter lines');
   // --- Names (r0 the kind, r3 the text table entry, r4 the controller).
-  const subtitle = p.code(`ldrh r1,[r3,#2];cmp r0,#${KIND_GRAIN};beq grain;cmp r0,#${KIND_TONING};bne done;
+  const subtitle = p.code(`ldrh r1,[r3,#2];cmp r0,#${KIND_GRAIN};beq grain;${o.grain ? `cmp r0,#${KIND_CROSS};beq cross;` : ''}${o.teal ? `cmp r0,#${KIND_HUE};beq hue;` : ''}cmp r0,#${KIND_TONING};bne done;
     ${film('ip', 'r4')}movwls r1,#${o.colourText};b done;
-    grain:${film('ip', 'r4')}movwls r1,#${o.halationText};done:b #${SUBTITLE + 4};`);
+    grain:${film('ip', 'r4')}movwls r1,#${o.halationText};${o.grain ? `b done;cross:${film('ip', 'r4')}movwls r1,#${GRAIN_TEXT};` : ''}${o.teal ? `b done;hue:${film('ip', 'r4')}movwls r1,#${o.teal.text};` : ''}done:b #${SUBTITLE + 4};`);
   p.patch(SUBTITLE, 0xe1d310b2, branchWord(SUBTITLE, subtitle), 'halation: names of the lines');
 
   // ------------------------------------------------------------------ Halation (kind 15)
@@ -147,11 +176,14 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
   const scale10 = p.code(`${film('r3', 'r6')}mov r3,#${TONING_SCALE};movwls r3,#${o.colourScale};b #${SCALE10 + 4};`);
   p.patch(SCALE10, 0xe3a030d3, branchWord(SCALE10, scale10), 'halation: colour scale');
   // Two positions for a film (count 1, spacing 0x168), as GR IV's colour row.
-  const positions10 = p.code(`${film('r2', 'r6')}mov r2,#2;mov r3,#0xb4;movls r2,#1;movls r3,#0x168;b #${POSITIONS10 + 8};`);
-  p.patch(POSITIONS10, 0xe3a02002, branchWord(POSITIONS10, positions10), 'halation: the colour has two positions');
-  // Start and position: the colour (the native map of kind 10 is {0, 1, 2}: value = position).
+  // (The Grain row's builds: four, red, orange, gold and white: count 3, spacing 0x78, as Grain Effect's.)
+  const positions10 = p.code(o.grain ? `${film('r2', 'r6')}mov r2,#2;mov r3,#0xb4;movls r2,#3;movls r3,#0x78;b #${POSITIONS10 + 8};`
+    : `${film('r2', 'r6')}mov r2,#2;mov r3,#0xb4;movls r2,#1;movls r3,#0x168;b #${POSITIONS10 + 8};`);
+  p.patch(POSITIONS10, 0xe3a02002, branchWord(POSITIONS10, positions10), o.grain ? 'halation: the colour has four positions' : 'halation: the colour has two positions');
+  // Start and position: the colour (the native map of kind 10 is {0, 1, 2}: value = position; with
+  // four positions the film's position is given as it is, the map skipped).
   const colour = (at: number, ctl: string, native: number) => {
-    const stub = p.code(`${film('r2', ctl)}bhi native;ldrb r0,[${ctl},#0x198];ldrb r1,[${ctl},#0x199];bl #${o.col};b #${at + 4};
+    const stub = p.code(`${film('r2', ctl)}bhi native;ldrb r0,[${ctl},#0x198];ldrb r1,[${ctl},#0x199];bl #${o.col};b #${at + (o.grain ? 8 : 4)};
       native:bl #${native};b #${at + 4};`);
     p.patch(at, bl(at, native), bl(at, stub), 'halation: the stored colour');
     return stub;
@@ -160,13 +192,69 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
   // List line: no value text (GR IV's colour row shows no number); a red or a white light.
   const text10 = p.code(`${film('r2', 'r6')}bhi native;mov r2,#0;strb r2,[r1];b #${LIST_TEXT10 + 4};native:bl #${TEXT10};b #${LIST_TEXT10 + 4};`);
   p.patch(LIST_TEXT10, bl(LIST_TEXT10, TEXT10), bl(LIST_TEXT10, text10), 'halation: no colour text');
+  if (o.grain && (o.goldIcon === undefined || o.orangeIcon === undefined)) fail('the gold and orange icons');
+  const colourIcons = o.grain ? `cmp r0,#1;movw r1,#${o.redIcon};movweq r1,#${o.orangeIcon};cmp r0,#2;movweq r1,#${o.goldIcon};movwhi r1,#${o.whiteIcon};`
+    : `cmp r0,#0;movw r1,#${o.redIcon};movwne r1,#${o.whiteIcon};`;
   const icon10 = p.code(`${film('r1', 'r6')}movw r1,#${TONING_ICON};bhi done;push {r0,r2,r3,lr};ldrb r0,[r6,#0x198];ldrb r1,[r6,#0x199];bl #${o.col};
-    cmp r0,#0;movw r1,#${o.redIcon};movwne r1,#${o.whiteIcon};pop {r0,r2,r3,lr};done:b #${LIST_ICON10 + 4};`);
+    ${colourIcons}pop {r0,r2,r3,lr};done:b #${LIST_ICON10 + 4};`);
   p.patch(LIST_ICON10, movWord(1, TONING_ICON), branchWord(LIST_ICON10, icon10), 'halation: colour icon');
-  // Moving the slider (r1 the value = the position, r4 the controller).
-  const setter10 = p.code(`${film('r2', 'r4')}bhi native;mov r2,r1;ldrb r0,[r4,#0x198];ldrb r1,[r4,#0x199];bl #${o.colPut};b #${SETTER10 + 4};
+  // Moving the slider (r1 the value = the position, r4 the controller; four positions: r6 the position).
+  const setter10 = p.code(`${film('r2', 'r4')}bhi native;mov r2,${o.grain ? 'r6' : 'r1'};ldrb r0,[r4,#0x198];ldrb r1,[r4,#0x199];bl #${o.colPut};b #${SETTER10 + 4};
     native:bl #${HDR_SETTER};b #${SETTER10 + 4};`);
   p.patch(SETTER10, bl(SETTER10, HDR_SETTER), bl(SETTER10, setter10), 'halation: store the colour');
+
+  // ------------------------------------------------------------------ Grain (kind 11)
+  const grainRow = o.grain ? (() => {
+    const g = o.grain!;
+    const rows: readonly (readonly [number, number])[] = [
+      [START11, bl(START11, STORED_GETTER11)], [START11 + 4, bl(START11 + 4, MAP11)], [START11 - 0x18, 0xe1a06000],
+      [SCALE11, 0xe3a03000 | CROSS_SCALE], [POSITIONS11, 0xe3a02002], [POSITIONS11 + 4, 0xe3a030b4], [POSITIONS11 + 8, 0xe24b0054],
+      [POSITION11, bl(POSITION11, LIVE_GETTER11)], [POSITION11 + 4, bl(POSITION11 + 4, MAP11)], [POSITION11 + 8, 0xe1a04000],
+      [LIST_TEXT11, bl(LIST_TEXT11, TEXT11)], [LIST_TEXT11 - 4, 0xe1a01005], [LIST_TEXT11 - 0x14, 0xe1a07000],
+      [LIST_ICON11, movWord(1, TONING_ICON)], [SETTER11, bl(SETTER11, CROSS_SETTER)], [SETTER11 - 4, 0xe7d31006],
+    ];
+    for (const [at, w] of rows) if (p.u32(at) !== w >>> 0) fail(`Grain row guard at ${at.toString(16)}`);
+    // Scale and positions: Grain Effect's (57; four positions, spacing 0x78).
+    const scale = p.code(`${film('r3', 'r6')}mov r3,#${CROSS_SCALE};movls r3,#${GRAIN_SCALE};b #${SCALE11 + 4};`);
+    p.patch(SCALE11, 0xe3a03000 | CROSS_SCALE, branchWord(SCALE11, scale), 'Grain row: Grain Effect\'s scale');
+    const positions = p.code(`${film('r2', 'r6')}mov r2,#2;mov r3,#0xb4;movls r2,#3;movls r3,#0x78;b #${POSITIONS11 + 8};`);
+    p.patch(POSITIONS11, 0xe3a02002, branchWord(POSITIONS11, positions), 'Grain row: four positions');
+    // Start and position: the film's grain (0..3) is the position (the native map skipped).
+    const amount = (at: number, ctl: string, native: number) => {
+      const stub = p.code(`${film('r2', ctl)}bhi native;ldrb r0,[${ctl},#0x198];ldrb r1,[${ctl},#0x199];bl #${g.get};b #${at + 8};
+        native:bl #${native};b #${at + 4};`);
+      p.patch(at, bl(at, native), bl(at, stub), 'Grain row: the stored grain');
+      return stub;
+    };
+    const start = amount(START11, 'r6', STORED_GETTER11), position = amount(POSITION11, 'r5', LIVE_GETTER11);
+    // List line: value text ("--", "1", "2", "3"; r1 the buffer) and Grain Effect's icon (r0, r2 kept).
+    const text = p.code(`${film('r2', 'r7')}bhi native;mov r2,r1;ldrb r0,[r7,#0x198];ldrb r1,[r7,#0x199];bl #${g.text};b #${LIST_TEXT11 + 4};
+      native:bl #${TEXT11};b #${LIST_TEXT11 + 4};`);
+    p.patch(LIST_TEXT11, bl(LIST_TEXT11, TEXT11), bl(LIST_TEXT11, text), 'Grain row: value of the line');
+    const icon = p.code(`${film('r1', 'r7')}movw r1,#${TONING_ICON};movwls r1,#${GRAIN_ICON};b #${LIST_ICON11 + 4};`);
+    p.patch(LIST_ICON11, movWord(1, TONING_ICON), branchWord(LIST_ICON11, icon), 'Grain row: Grain Effect\'s icon');
+    // Moving the slider (r6 the position = the amount, r4 the controller).
+    const setter = p.code(`${film('r2', 'r4')}bhi native;mov r2,r6;ldrb r0,[r4,#0x198];ldrb r1,[r4,#0x199];bl #${g.put};b #${SETTER11 + 4};
+      native:bl #${CROSS_SETTER};b #${SETTER11 + 4};`);
+    p.patch(SETTER11, bl(SETTER11, CROSS_SETTER), bl(SETTER11, setter), 'Grain row: store the grain');
+    // The screen's number of lines: made when it opens (0x531afbe0), the most lines of any of the
+    // camera's looks (columns 0..11 of the three sets, at most 11): a film's lines past that are not
+    // shown (Standard's 9 and three more). After that loop the films' entries count too (36 + set).
+    const words: readonly (readonly [number, number])[] = [[LINES_SIZE, 0xe5d5019e], [LINES_SIZE - 0x18, 0xe354000c], [LINES_SIZE - 8, 0xe3560003], [LINES_SIZE + 4, bl(LINES_SIZE + 4, 0x536af31c)]];
+    for (const [at, w] of words) if (p.u32(at) !== w >>> 0) fail(`line count guard at ${at.toString(16)}`);
+    const lines = p.code(`push {r4,r6};mov r6,#0;next:mov r0,r5;mov r1,r6;mov r2,#11;mul r2,r2,r6;rsb r2,r2,#${36};bl #${LINE_COUNT};
+      ldrb r3,[r5,#0x19e];cmp r3,r0;strblo r0,[r5,#0x19e];add r6,r6,#1;cmp r6,#3;bne next;pop {r4,r6};ldrb r0,[r5,#0x19e];b #${LINES_SIZE + 4};`);
+    p.patch(LINES_SIZE, 0xe5d5019e, branchWord(LINES_SIZE, lines), 'Grain row: the screen has lines for every film line');
+    return { scale11: scale, positions11: positions, start11: start, position11: position, text11: text, icon11: icon, setter11: setter, lines };
+  })() : undefined;
+
+  // ------------------------------------------------------------------ Teal sky (kind 1, Hue)
+  const tealRow = o.teal ? (() => {
+    if (p.u32(LIST_ICON1) !== movWord(1, HUE_ICON) || p.u32(LIST_ICON1 - 0x2c) !== 0xe1a06000) fail('Hue line guard');
+    const icon = p.code(`${film('r1', 'r6')}movw r1,#${HUE_ICON};movwls r1,#${o.teal!.icon};b #${LIST_ICON1 + 4};`);
+    p.patch(LIST_ICON1, movWord(1, HUE_ICON), branchWord(LIST_ICON1, icon), 'teal sky: the films\' Hue line\'s icon');
+    return { icon1: icon };
+  })() : undefined;
 
   // ------------------------------------------------------------------ Cancel
   // The screen backs the parameters up when it opens (0x532c337c, a thunk to 0x532c325c) and
@@ -180,5 +268,5 @@ export function installGr3xHalationRows(p: Gr3xHalationRowsProgram, o: Gr3xHalat
   const backup = o.backup !== undefined ? thunk(BACKUP, BACKUP_BODY, o.backup, 'halation: kept when the parameter screen opens') : undefined;
   const restore = o.restore !== undefined ? thunk(RESTORE, RESTORE_BODY, o.restore, 'halation: put back on Cancel') : undefined;
   return { table, lists: [l0, l12], base, subtitle, start15, position15, text15, icon15, setter15,
-    scale10, positions10, start10, position10, text10, icon10, setter10, ...(backup !== undefined ? { backup, restore } : {}) };
+    scale10, positions10, start10, position10, text10, icon10, setter10, ...(grainRow ?? {}), ...(tealRow ?? {}), ...(backup !== undefined ? { backup, restore } : {}) };
 }

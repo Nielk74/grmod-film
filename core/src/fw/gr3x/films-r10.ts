@@ -70,6 +70,9 @@ import { branchWord, movWord, wordsToBytes } from '../aspect/arm';
 import { linkModule } from '../aspect/native-link';
 import { FirmwareError } from '../types';
 import { GR3X_FILMS_MODULE } from './films-native';
+import { GR3X_FILMS_DEFAULTS_MODULE } from './films-defaults-native';
+import { GR3X_FILMS_GRAIN_MODULE } from './films-grain-native';
+import { GR3X_RECIPE_NP } from './film-recipe';
 import { GR3X_R10, GR3X_SETTINGS_LOAD, GR3X_SETTINGS_SAVE, gr3xSettingsHook, gr3xSettingsPrior } from './round10';
 import type { Gr3xSite } from './round10';
 
@@ -123,6 +126,41 @@ export function installGr3xR10Tables(p: Gr3xR10Program, films: readonly Gr3xR10F
 /** The four words the camera's start-up gives every native tone record (0x536eb0e4) at words 17..20. */
 export const GR3X_TONE_RECORD_TAIL = 0x53dc27a4;
 
+// ------------------------------------------------------------------ teal sky (a film's Hue)
+/**
+ * GR Mod's film recipes: on a film, the Hue row moves the skies toward teal instead of turning every
+ * colour. Read from the official 2.10 code: the camera applies Hue as one of nine matrices on the
+ * finished picture (its RGB -> YCbCr conversion, 0x536e4720: the look's YCbCr record, array[hue]),
+ * indexed by the descriptor's Hue byte (+0x5c, written at 0x536dc4b0 from the development step's
+ * +0x1e2). A teal sky needs the linear light, where the film's own matrix works: each film has nine
+ * tone records (image-control.ts), the same but for the matrix (the teal step Hue - 4 composed in,
+ * color/sky.ts), and
+ *  - the descriptor builder's one read of the tone table (0x536dc2a0, `ldr lr,[r0,r1,lsl #2]`, r1 the
+ *    look) gives a film the record of its Hue (the development step has written it at obj+0x1e2, obj = r6);
+ *  - the descriptor's Hue byte of a film is the neutral 4 (0x536dc4b0, `strb ip,[r4,#0x5c]`), so the
+ *    camera's own hue rotation (and whatever else reads that byte) leaves the film alone.
+ * The camera's looks keep their Hue. Live view goes through the same builder.
+ */
+const TONE_READ = 0x536dc2a0, TONE_READ_WORD = 0xe790e101, TONE_READ_NEXT = 0x536dc2a4;
+const HUE_STORE = 0x536dc4b0, HUE_STORE_WORD = 0xe5c4c05c;
+
+export function installGr3xR10TealHue(p: Gr3xR10Program, o: { films: number; records: readonly number[] }) {
+  const n = o.films;
+  if (!Number.isInteger(n) || n < 1 || n > 20 || o.records.length !== 9 * n) fail('teal sky records');
+  if (p.u32(TONE_READ) !== TONE_READ_WORD || p.u32(HUE_STORE) !== HUE_STORE_WORD) fail('teal sky sites');
+  const table = p.append(u32le([...o.records]));
+  // r1 the look, r6 the processing object (Hue at +0x1e2, 0..8); lr gets the record. r2, r3 kept; the
+  // next instructions set the flags before using them.
+  const read = p.code(`ldr lr,[r0,r1,lsl #2];push {r2,r3};sub r2,r1,#${FIRST};cmp r2,#${n - 1};bhi done;
+    add r3,r6,#0x1e0;ldrh r3,[r3,#2];cmp r3,#8;movhi r3,#4;add r2,r2,r2,lsl #3;add r2,r2,r3;
+    ${addr('lr', table)}ldr lr,[lr,r2,lsl #2];done:pop {r2,r3};b #${TONE_READ_NEXT};`);
+  p.patch(TONE_READ, TONE_READ_WORD, branchWord(TONE_READ, read), 'films: the tone record of the film\'s Hue (teal sky)');
+  // r7 the picture's parameters (look at +0x77c); r1 kept.
+  const store = p.code(`push {r1};ldrb r1,[r7,#0x77c];sub r1,r1,#${FIRST};cmp r1,#${n - 1};movls ip,#4;pop {r1};strb ip,[r4,#0x5c];b #${HUE_STORE + 4};`);
+  p.patch(HUE_STORE, HUE_STORE_WORD, branchWord(HUE_STORE, store), 'films: no camera hue rotation (their Hue is the teal sky)');
+  return { tealTable: table, tealRead: read, tealHueStore: store };
+}
+
 // ------------------------------------------------------------------ parameters
 /** The parameter setters' call of the current look (GR3X_PARAMETER_SETTER_LOOKS) and its target. */
 const CURRENT_LOOK = 0x53549ee8;
@@ -160,6 +198,12 @@ export interface Gr3xR10ParameterOptions {
   prints: readonly number[];
   hiddenMask: number;
   setterSites: readonly number[];
+  /** GR Mod's film recipes: the values each film starts from (GR3X_RECIPE_NP bytes per film,
+   * film-recipe.ts). Absent: the films start neutral, with the module of films-native.ts as before. */
+  defaults?: Uint8Array;
+  /** GR Mod's Grain row (films.c -DGRAIN_ROW, films-grain-native.ts): grain and gold Halation in the
+   * Toning byte, its values 0..95 (needs `defaults`). */
+  grainRow?: boolean;
 }
 
 export function installGr3xR10Parameters(p: Gr3xR10Program, o: Gr3xR10ParameterOptions) {
@@ -187,7 +231,7 @@ export function installGr3xR10Parameters(p: Gr3xR10Program, o: Gr3xR10ParameterO
     return stub;
   });
   // Default getters (r1 the look): a film's neutral value; anything else as the camera's.
-  const defaults = DEFAULT_GETTERS.map(([at, field]) => {
+  const defaultGetters = DEFAULT_GETTERS.map(([at, field]) => {
     if (p.u32(at) !== 0xe1a0c00d) fail(`default getter at ${at.toString(16)}`);
     const stub = p.code(`${isFilm('r1', 'ip')}movls r0,#${FILM_DEFAULT[field]};bxls lr;mov ip,sp;b #${at + 4};`);
     p.patch(at, 0xe1a0c00d, branchWord(at, stub), 'films as looks: a film\'s neutral parameter default');
@@ -195,13 +239,19 @@ export function installGr3xR10Parameters(p: Gr3xR10Program, o: Gr3xR10ParameterO
   });
   // The module.
   const prints = p.append(u32le([...o.prints, o.hiddenMask]));
+  if (o.defaults && o.defaults.length !== n * GR3X_RECIPE_NP) fail('film recipes');
+  const defaults = o.defaults ? p.append(o.defaults) : 0;
   const origin = p.next();
   const priorLoad = gr3xSettingsPrior(p, 'load'), priorSave = gr3xSettingsPrior(p, 'save');
-  const mod = linkModule(GR3X_FILMS_MODULE, 'films', n, origin, {
+  const bindings = {
     prior_native_save: priorSave, prior_native_load: priorLoad, storage_singleton: STORAGE, store_write: STORE_WRITE,
     store_read: STORE_READ, store_size: STORE_SIZE, heap_alloc: HEAP_ALLOC, sp_gap: GR3X_R10.slotState,
     settings_object: GR3X_SETTINGS_OBJECT, slot_prints: prints,
-  });
+  };
+  if (o.grainRow && !o.defaults) fail('the Grain row needs the films\' starting values');
+  const mod = o.grainRow ? linkModule(GR3X_FILMS_GRAIN_MODULE, 'films (Grain row)', n, origin, { ...bindings, film_defaults: defaults })
+    : o.defaults ? linkModule(GR3X_FILMS_DEFAULTS_MODULE, 'films (recipes)', n, origin, { ...bindings, film_defaults: defaults })
+    : linkModule(GR3X_FILMS_MODULE, 'films', n, origin, bindings);
   if (p.append(mod.code) !== origin) fail('module address changed');
   const sym = mod.symbols;
   gr3xSettingsHook(p, 'load', sym.sp_load, 'films: the settings load, then their table');
@@ -230,7 +280,7 @@ export function installGr3xR10Parameters(p: Gr3xR10Program, o: Gr3xR10ParameterO
   if (p.u32(SLIDER_MAP) !== 0xe1a0c00d) fail('Toning slider map');
   const sliderMap = p.code(`sub ip,r0,#1;cmp ip,#2;movhi r0,#1;mov ip,sp;b #${SLIDER_MAP + 4};`);
   p.patch(SLIDER_MAP, 0xe1a0c00d, branchWord(SLIDER_MAP, sliderMap), 'Bleach Bypass Toning 1..3 for its slider');
-  return { setters, checks, defaults, module: origin, moduleSymbols: { ...sym }, prints, styles, menuRows, clampTable, devToning, sliderMap };
+  return { setters, checks, defaults: defaultGetters, module: origin, moduleSymbols: { ...sym }, prints, ...(o.defaults ? { filmDefaults: defaults } : {}), styles, menuRows, clampTable, devToning, sliderMap };
 }
 
 // ------------------------------------------------------------------ RAW development
@@ -321,7 +371,9 @@ const RAW_RECORD = 0x535bf7c4, PLAY_NUMBER = 0x535c2508, PLAY_STYLE = 0x532b44dc
 const LIST_ASSIGN = 0x535c3ed8, LISTS = [0x535ca050, 0x535ca310] as const, LIST_CALLS = 17, LISTS_WITH_BLEACH = 7;
 const TONING_WRITER = 0x535c5e34, TONING_READER = 0x535c0d04;
 
-export function installGr3xR10PictureInfo(p: Gr3xR10Program, films: number, firstIcon: number) {
+export function installGr3xR10PictureInfo(p: Gr3xR10Program, films: number, firstIcon: number, grainRow = false) {
+  // A film's Toning byte: Halation states 0..11, with the Grain row 0..95 (films.c GRAIN_ROW).
+  const toningMax = grainRow ? 95 : 11;
   const n = films;
   if (p.u32(TONE_WRITER) !== movWord(3, 0xad6c) || p.u32(NOTE_STORE) !== 0xe5903010) fail('maker note look');
   const writer = p.code(`ldrb ip,[r2,#0x77c];sub ip,ip,#${FIRST};cmp ip,#${n - 1};bhi native;mov r0,r1;mov r1,#0;movw r2,#${GR3X_FILM_TONE_CODE};add r2,r2,ip;b #${NOTE_STORE};
@@ -359,10 +411,10 @@ export function installGr3xR10PictureInfo(p: Gr3xR10Program, films: number, firs
   if (grown.length !== LISTS_WITH_BLEACH) fail(`maker note lists with Bleach Bypass: ${grown.length}`);
   // Bleach Bypass's Toning: a film's Halation state s as code 0x100 + s, and back.
   if (p.u32(TONING_WRITER) !== movWord(3, 0x7ad8) || p.u32(TONING_READER) !== movWord(3, 0xad90)) fail('maker note Toning');
-  const toningWriter = p.code(`ldrb ip,[r1,#0x77c];sub ip,ip,#${FIRST};cmp ip,#${n - 1};bhi native;ldrb r0,[r1,#0x786];cmp r0,#11;movhi r0,#0;add r0,r0,#0x100;bx lr;
+  const toningWriter = p.code(`ldrb ip,[r1,#0x77c];sub ip,ip,#${FIRST};cmp ip,#${n - 1};bhi native;ldrb r0,[r1,#0x786];cmp r0,#${toningMax};movhi r0,#0;add r0,r0,#0x100;bx lr;
     native:movw r3,#0x7ad8;b #${TONING_WRITER + 4};`);
   p.patch(TONING_WRITER, movWord(3, 0x7ad8), branchWord(TONING_WRITER, toningWriter), 'films: the maker note\'s Toning holds the Halation');
-  const toningReader = p.code(`sub ip,r1,#0x100;cmp ip,#11;strbls ip,[r2,#0x786];bxls lr;movw r3,#0xad90;b #${TONING_READER + 4};`);
+  const toningReader = p.code(`sub ip,r1,#0x100;cmp ip,#${toningMax};strbls ip,[r2,#0x786];bxls lr;movw r3,#0xad90;b #${TONING_READER + 4};`);
   p.patch(TONING_READER, movWord(3, 0xad90), branchWord(TONING_READER, toningReader), 'films: the Halation back from the maker note');
   // Readers of the look code.
   const codeOf = (r: string) => `sub ${r},r0,#${GR3X_FILM_TONE_CODE & 0xff00};sub ${r},${r},#${GR3X_FILM_TONE_CODE & 0xff};cmp ${r},#${n - 1};`;

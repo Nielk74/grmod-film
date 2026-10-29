@@ -110,6 +110,36 @@ static const uint8_t OLD_TO_NEW[OLD_NP] = {0, 1, 2, 3, 4, 5, 6, 8, 9};
  * the middle of the -4..+4 scales; the Toning byte 0, Halation off (GR IV's state 0). */
 static const uint8_t NEUTRAL[NP] = {4, 4, 4, 4, 4, 4, 4, 0, 4, 4};
 
+#ifdef GRAIN_ROW
+/* GR Mod's Grain row and gold and orange Halation (-DGRAIN_ROW, films-grain-native.ts; halation-rows.ts
+ * shows them): the Toning byte holds the Halation state h, 0..23 (GR IV's 0..11; gold on 12, 13, 14
+ * weak / medium / strong, gold off 15, 16, 17 remembering them; orange on 18, 19, 20, off 21, 22, 23),
+ * and the grain amount g (0 off, 1..3) as h + 24 g, 0..95. The camera keeps, saves, restores and
+ * records the byte as it is. */
+#define TONING_MAX 95u
+#define STATES 24u
+#define TABLE_MAX 95u                 /* the largest byte a saved table may hold */
+#else
+#define TONING_MAX 11u
+#define TABLE_MAX 0x20u
+#endif
+
+#ifdef FILM_DEFAULTS
+/* GR Mod's film recipes (-DFILM_DEFAULTS, films-defaults-native.ts): each film of the build starts
+ * from its own values (NP per film, the order of FIELD; 0..8 on the -4..+4 scales, the Toning byte a
+ * Halation state 0..11) instead of NEUTRAL, wherever it would start from neutral. Bleach Bypass and
+ * the looks beyond the build's count keep NEUTRAL; the screen's "0" stays the neutral value. */
+extern const uint8_t film_defaults[];
+__attribute__((noinline)) static uint8_t start_of(uint32_t o, uint32_t j) {
+    if (o < 1u || o > SLOT_COUNT) return NEUTRAL[j];
+    uint8_t v = film_defaults[(o - 1u) * NP + j];
+    return v <= (j == TONING ? TONING_MAX : 8u) ? v : NEUTRAL[j];
+}
+#define START(o, j) start_of((o), (j))
+#else
+#define START(o, j) NEUTRAL[j]
+#endif
+
 /* Bleach Bypass's Toning field setters of the photo sets (UserDataModel*, value): the field, then
  * through the active check to the live value. */
 static const uint32_t TONING_SETTER[3] = {0x5325d3cc, 0x5325f90c, 0x53261eac};
@@ -227,6 +257,93 @@ void sp_before_recall(uint8_t *ud) {
     }
 }
 
+#ifdef GRAIN_ROW
+/* ---- Halation and grain (the Toning byte, see GRAIN_ROW) ------------------------------------- */
+/* State -> strength (0 off, 1 weak, 2 medium, 3 strong) | colour << 2 (0 red, 1 white, 2 gold, 3 orange). */
+static const uint8_t DECODE[STATES] = {0, 1, 3, 2, 5, 6, 7, 0, 0, 4, 4, 4, 9, 10, 11, 8, 8, 8, 13, 14, 15, 12, 12, 12};
+/* Off states remembering strength (0..2 = weak, medium, strong), per colour. */
+static const uint8_t OFF_STATE[12] = {0, 7, 8, 9, 10, 11, 15, 16, 17, 21, 22, 23};
+/* On states: strength 1..3, per colour: red 1, 3, 2; white 4, 5, 6; gold 12, 13, 14; orange 18, 19, 20. */
+static const uint8_t ON_STATE[12] = {1, 3, 2, 4, 5, 6, 12, 13, 14, 18, 19, 20};
+/* The strength (0..2) an Off state remembers. */
+static const uint8_t OFF_STRENGTH[STATES] = {0, 0, 2, 1, 0, 1, 2, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2};
+
+static uint32_t encode(uint32_t strength, uint32_t colour, uint32_t was) {
+    if (was >= STATES) was = 0;
+    if (strength == 0u) return OFF_STATE[colour * 3u + OFF_STRENGTH[was]];
+    return ON_STATE[colour * 3u + strength - 1u];
+}
+
+static volatile uint8_t *toning_of(uint32_t look, uint32_t set, State *s, int *field) {
+    uint8_t *rec = record_of(settings_object, 0);
+    int o = owner_of(look);
+    *field = 0;
+    if (!s || !s->loaded || !rec || set >= 3u || o < 1) return 0;
+    if (owner(rec, set) == o) { *field = 1; return (volatile uint8_t *)rec + FIELD[TONING][set]; }
+    return &s->t[o][set][TONING];
+}
+
+/* The whole byte (0..71; anything else 0). */
+static uint32_t toning_byte(uint32_t look, uint32_t set) {
+    int field;
+    volatile uint8_t *v = toning_of(look, set, state(), &field);
+    return v && *v <= TONING_MAX ? *v : 0u;
+}
+/* The grain of a byte (no division: the module has no run-time library). */
+static uint32_t grain_of(uint32_t b) {
+    uint32_t g = 0;
+    while (b >= STATES) { b -= STATES; g++; }
+    return g;
+}
+static uint32_t halation_state(uint32_t look, uint32_t set) {
+    uint32_t b = toning_byte(look, set);
+    return b - STATES * grain_of(b);
+}
+
+static void put_state(uint32_t look, uint32_t set, uint32_t value) {
+    State *s = state();
+    int field;
+    volatile uint8_t *v = toning_of(look, set, s, &field);
+    if (!v || value > TONING_MAX || *v == value) return;
+    if (field) ((uint32_t (*)(uint8_t *, uint32_t))TONING_SETTER[set])(settings_object, value);
+    else { *v = (uint8_t)value; s->dirty = 1; }
+}
+/* A new Halation state, the grain kept. */
+static void put_halation(uint32_t look, uint32_t set, uint32_t h) {
+    put_state(look, set, h + STATES * grain_of(toning_byte(look, set)));
+}
+
+/* The parameter screen's Halation line: the strength (0 off, 1..3) of the film in a photo set. */
+uint32_t sp_hal(uint32_t look, uint32_t set) { return DECODE[halation_state(look, set)] & 3u; }
+void sp_hal_put(uint32_t look, uint32_t set, uint32_t strength) {
+    uint32_t was = halation_state(look, set);
+    if (strength <= 3u) put_halation(look, set, encode(strength, DECODE[was] >> 2, was));
+}
+/* The Colour line's position: 0 red, 1 orange, 2 gold, 3 white (the colours as DECODE has them: 0, 3,
+ * 2, 1; the same table both ways). */
+static const uint8_t COLOUR_POSITION[4] = {0, 3, 2, 1};
+uint32_t sp_col(uint32_t look, uint32_t set) { return COLOUR_POSITION[DECODE[halation_state(look, set)] >> 2]; }
+void sp_col_put(uint32_t look, uint32_t set, uint32_t position) {
+    uint32_t was = halation_state(look, set);
+    if (position <= 3u) put_halation(look, set, encode(DECODE[was] & 3u, COLOUR_POSITION[position], was));
+}
+static void level_text(uint32_t v, uint8_t *text) {
+    if (!text) return;
+    text[0] = v == 0u ? '-' : (uint8_t)('0' + v);
+    text[1] = v == 0u ? '-' : 0;
+    text[2] = 0;
+}
+/* The Halation line's value text (a 3-byte buffer), as Grain Effect's: "--", "1", "2", "3". */
+void sp_hal_text(uint32_t look, uint32_t set, uint8_t *text) { level_text(sp_hal(look, set), text); }
+
+/* The Grain line: 0 off, 1..3 (GR Mod's grain module, in the picture). */
+uint32_t sp_grain(uint32_t look, uint32_t set) { return grain_of(toning_byte(look, set)); }
+void sp_grain_put(uint32_t look, uint32_t set, uint32_t g) {
+    if (g <= 3u) put_state(look, set, halation_state(look, set) + STATES * g);
+}
+void sp_grain_text(uint32_t look, uint32_t set, uint8_t *text) { level_text(sp_grain(look, set), text); }
+
+#else
 /* ---- Halation (the Toning byte: GR IV's states 0..11, aspect/halation-ui.ts) ------------------ */
 /* State -> strength (0 off, 1 weak, 2 medium, 3 strong) | white << 2. */
 static const uint8_t DECODE[12] = {0, 1, 3, 2, 5, 6, 7, 0, 0, 4, 4, 4};
@@ -287,6 +404,8 @@ void sp_hal_text(uint32_t look, uint32_t set, uint8_t *text) {
     text[1] = v == 0u ? '-' : 0;
     text[2] = 0;
 }
+
+#endif
 
 /* ---- RAW development ------------------------------------------------------------------------- */
 static int raw_owner(uint32_t look) {
@@ -360,7 +479,7 @@ static int read_record(State *s) {
     if (s->rec[0] != REC_MAGIC || s->rec[1] != REC_VERSION || s->rec[2] != TBYTES) return 0;
     if (s->rec[REC_WORDS - 1u] != checksum(s->rec, REC_WORDS - 1u)) return 0;
     const volatile uint8_t *b = (const volatile uint8_t *)&s->rec[3u + OWNERS];
-    for (uint32_t i = 0; i < TBYTES; i++) if (b[i] > 0x20u) return 0;
+    for (uint32_t i = 0; i < TBYTES; i++) if (b[i] > TABLE_MAX) return 0;
     for (uint32_t o = 0; o < OWNERS; o++) s->fp[o] = s->rec[3u + o];
     copy_bytes(&s->t[0][0][0], b, TBYTES);
     return 1;
@@ -415,14 +534,14 @@ static void neutral_fields(uint8_t *ud, uint32_t o) {
         if (!rec) continue;
         for (uint32_t c = 0; c < COMBOS; c++) {
             if (owner_of(look_at((const uint8_t *)rec, c)) != (int)o) continue;
-            for (uint32_t j = 0; j < NP; j++) if (FIELD[j][c]) rec[FIELD[j][c]] = NEUTRAL[j];
+            for (uint32_t j = 0; j < NP; j++) if (FIELD[j][c]) rec[FIELD[j][c]] = START(o, j);
         }
     }
 }
 
 static void neutral_owner(State *s, uint8_t *ud, uint32_t o) {
     for (uint32_t c = 0; c < COMBOS; c++)
-        for (uint32_t j = 0; j < NP; j++) s->t[o][c][j] = FIELD[j][c] ? NEUTRAL[j] : 0u;
+        for (uint32_t j = 0; j < NP; j++) s->t[o][c][j] = FIELD[j][c] ? START(o, j) : 0u;
     neutral_fields(ud, o);
 }
 
@@ -443,7 +562,7 @@ static void take_over(State *s, uint8_t *ud, uint8_t ot[OWNERS][OLD_SETS][OLD_NP
     uint8_t *rec = record_of(ud, 0);
     for (uint32_t k = 0; k < MAXFILMS; k++)
         for (uint32_t c = 0; c < COMBOS; c++)
-            for (uint32_t j = 0; j < NP; j++) s->t[k + 1u][c][j] = FIELD[j][c] ? NEUTRAL[j] : 0u;
+            for (uint32_t j = 0; j < NP; j++) s->t[k + 1u][c][j] = FIELD[j][c] ? START(k + 1u, j) : 0u;
     for (uint32_t o = 1; o < (got == 1 ? OLD_V1_OWNERS : OWNERS); o++)
         for (uint32_t set = 0; set < OLD_SETS; set++) {
             for (uint32_t j = 0; j < OLD_NP; j++) s->t[o][set][OLD_TO_NEW[j]] = ot[o][set][j];
@@ -501,7 +620,7 @@ uint32_t sp_load(uint8_t *ud) {
                 for (uint32_t j = 0; j < NP; j++) {
                     uint32_t f = FIELD[j][c];
                     s->t[0][c][j] = f ? ((volatile uint8_t *)rec)[f] : 0u;
-                    for (uint32_t o = 1; o < OWNERS; o++) s->t[o][c][j] = f ? NEUTRAL[j] : 0u;
+                    for (uint32_t o = 1; o < OWNERS; o++) s->t[o][c][j] = f ? START(o, j) : 0u;
                 }
             for (uint32_t o = 1; o <= SLOT_COUNT; o++) neutral_fields(ud, o);
         }

@@ -36,6 +36,8 @@ import type { HalationLight } from '../aspect/halation';
 import { halationLutR6, halationModuleR6, paramBytesR6 } from './halation-r6';
 import type { HalationLightR6 } from './halation-r6';
 import { GR3X_DATESTAMP_DIAG_R6_CODE, GR3X_HALATION_STATUS_R6_CODE } from './picture-modules-r6';
+import { GRAIN_CODE } from './grain-code';
+import { GRAIN_AMOUNT, GRAIN_CELL, GRAIN_MAGIC, grainTone } from '../../color/grain';
 
 export const GR3X_JPEG_EXECUTE = 0x535047d4;
 export const GR3X_DEVELOP_LOOK_READ = 0x536db7f8;
@@ -81,8 +83,17 @@ export interface Gr3xJpegOptions {
   halation?: { levels: readonly number[]; light: readonly HalationLightR6[] };
   /** Round 7: 0.8.2's halation ('HAL4') for every film, its light; strength and colour come from
    * the camera through the stash word (look 64 + k as 32 + k, strength at bits 8..15, white bit 17). */
-  halation7?: { light: readonly HalationLight[] };
+  halation7?: { light: readonly HalationLight[];
+    /** GR Mod's Grain row: gold (stash bit 18) and orange (bit 21): the module gets another context
+     * whose tables are that colour's three (then the white glow's), and runs as for red. */
+    gold?: boolean };
   diagnostics?: boolean;
+  /** Round 10, GR Mod's film recipes: the grain of each film (grain.ts `grainSetting`: 0 none, else
+   * amount | size << 2), made by tools/grain/grain.c after the halation and before the date. */
+  grain?: { settings: readonly number[];
+    /** GR Mod's Grain row: the amount is set in the camera (stash bits 19..20, 0 off): one context per
+     * amount, whose look map has it with each film's size (`settings`: size << 2 only). */
+    camera?: boolean };
   /** The date imprint's stub, already at Execute's entry: the chain ends there instead (halation
    * first, then the date, as on GR IV). */
   after?: number;
@@ -93,7 +104,9 @@ const u16le = (v: readonly number[]) => { const b = new Uint8Array(v.length * 2)
 const addr = (r: string, a: number) => `movw ${r},#${a & 65535};movt ${r},#${a >>> 16};`;
 
 export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
-  if (!o.halation && !o.halation7 && !o.diagnostics) return undefined;
+  if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain) return undefined;
+  if (o.grain && (!o.halation7 || o.grain.settings.length !== o.halation7.light.length || o.grain.settings.some(v => !Number.isInteger(v) || v < 0 || v > 7 || (o.grain!.camera === true && (v & 3) !== 0))))
+    throw new FirmwareError('bad-edit', 'IIIx grain: round 10 films, a setting per film');
   if (o.halation && o.halation7) throw new FirmwareError('internal', 'IIIx halation: one form');
   if (o.halation7 && o.diagnostics) throw new FirmwareError('bad-edit', 'IIIx round 7 builds have no JPEG diagnostics');
   if (o.after !== undefined && (o.diagnostics || !p.retarget))
@@ -136,6 +149,36 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     if (o.diagnostics) entries.halationStatus = GR3X_HALATION_STATUS;
     tail = `b #${stub};`; first = stub;
   }
+  if (o.grain) {
+    // As halation.c's context: the cache functions, the allocator, the stash; then the grain's
+    // tables (grain.ts) and the look map (film k is look 32 + k in the stash, as for the halation).
+    const tone = p.append(grainTone());
+    const head = new Uint8Array(12), hv = new DataView(head.buffer);
+    GRAIN_AMOUNT.forEach((v, i) => hv.setUint16(i * 2, v, true));
+    GRAIN_CELL.forEach((v, i) => hv.setUint16(6 + i * 2, v, true));
+    const context = (amount: number) => {
+      const map = new Uint8Array(64);
+      o.grain!.settings.forEach((v, k) => { map[GR3X_HALATION_FILM_STYLE + k] = v | amount; });
+      return p.append(new Uint8Array([
+        ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, tone]),
+        ...head.subarray(0, 10), 0, 0, ...u32le([GRAIN_MAGIC]), ...map,
+      ]));
+    };
+    const code = () => p.append(Uint8Array.from(atob(GRAIN_CODE), c => c.charCodeAt(0)));
+    if (o.grain.camera) {
+      // The stash's amount (bits 19..20) picks the context; 0: no grain.
+      const contexts = [1, 2, 3].map(context), table = p.append(u32le([0, ...contexts])), module = code();
+      const stub = p.code(`push {r0-r3,ip,lr};${addr('r2', GR3X_HALATION_STASH)}ldr r2,[r2];mov r2,r2,lsr #19;and r2,r2,#3;cmp r2,#0;beq skip;
+        ${addr('r0', table)}ldr r0,[r0,r2,lsl #2];ldr r1,[r1,#8];bl #${module};skip:pop {r0-r3,ip,lr};${tail}`);
+      entries.grain = stub; entries.grainModule = module; entries.grainContext = contexts[0]; entries.grainContexts = table; entries.grainTone = tone;
+      tail = `b #${stub};`; first = stub;
+    } else {
+      const ctx = context(0), module = code();
+      const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}bl #${module};pop {r0-r3,ip,lr};${tail}`);
+      entries.grain = stub; entries.grainModule = module; entries.grainContext = ctx; entries.grainTone = tone;
+      tail = `b #${stub};`; first = stub;
+    }
+  }
   if (o.halation7) {
     const { light } = o.halation7;
     if (light.length < 1 || light.length > 20 || light.some(l => !(l.table instanceof Uint16Array) || l.table.length !== 256 || l.table.some(v => v > 16384)))
@@ -143,20 +186,26 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     // As GR IV 0.8.2's installHalationModule: red's three tables, then the white glow's one; an
     // entry per film {gains of Weak / Medium / Strong, 0, light[256]}; the look map after the magic.
     const lut = p.append(new Uint8Array([...halationLut('red'), ...halationLut('white').subarray(0, LUT_N)]));
+    const goldLut = o.halation7.gold ? p.append(new Uint8Array([...halationLut('gold'), ...halationLut('white').subarray(0, LUT_N)])) : 0;
+    const orangeLut = o.halation7.gold ? p.append(new Uint8Array([...halationLut('orange'), ...halationLut('white').subarray(0, LUT_N)])) : 0;
     const entries = p.append(new Uint8Array(light.flatMap(l => [...u16le([...halationGains(), 0]), ...u16le(Array.from(l.table))])));
     const map = new Uint8Array(64);
     light.forEach((_, k) => { map[GR3X_HALATION_FILM_STYLE + k] = k + 1; });
-    const ctx = p.append(new Uint8Array([
-      ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, lut, entries, light.length, 0]),
+    const context = (tables: number) => p.append(new Uint8Array([
+      ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, tables, entries, light.length, 0]),
       ...paramBytes(), ...u32le([HALATION_MAGIC_R7]), ...map,
     ]));
+    const ctx = context(lut), goldCtx = goldLut ? context(goldLut) : 0, orangeCtx = orangeLut ? context(orangeLut) : 0;
     const module = p.append(halationModule());
-    const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}bl #${module};pop {r0-r3,ip,lr};${tail}`);
-    entries7 = { halation: stub, halationModule: module, halationContext: ctx, halationLut: lut, halationLooks: entries };
+    // Gold (stash bit 18), orange (bit 21): the context with that colour's tables.
+    const pick = goldCtx ? `${addr('r2', GR3X_HALATION_STASH)}ldr r2,[r2];tst r2,#0x40000;movwne r0,#${goldCtx & 65535};movtne r0,#${goldCtx >>> 16};
+      tst r2,#0x200000;movwne r0,#${orangeCtx & 65535};movtne r0,#${orangeCtx >>> 16};` : '';
+    const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}${pick}bl #${module};pop {r0-r3,ip,lr};${tail}`);
+    entries7 = { halation: stub, halationModule: module, halationContext: ctx, halationLut: lut, halationLooks: entries, ...(goldCtx ? { halationGoldContext: goldCtx, halationGoldLut: goldLut, halationOrangeContext: orangeCtx } : {}) };
     tail = `b #${stub};`; first = stub;
   }
   Object.assign(entries, entries7);
-  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), 'JPEG encode step: halation, then the date imprint');
+  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), o.grain ? 'JPEG encode step: halation, grain, then the date imprint' : 'JPEG encode step: halation, then the date imprint');
   else p.patch(GR3X_JPEG_EXECUTE, 0xe1a0c00d, branchWord(GR3X_JPEG_EXECUTE, first), 'JPEG encode step: GR Mod picture modules');
   return entries;
 }

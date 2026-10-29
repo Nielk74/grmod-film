@@ -19,3 +19,6 @@ export { BASE_CURVE, CAL_CAM, CAL_ADOBE, CAL_COUNT, TONE_PARAMS } from './data';
 export { clarityLevels, simulateClarity } from './clarity';
 export { GR3X_CAMERA } from './gr3x-camera';
 export { convertGr3xCube, convertGr3xXmp } from './gr3x-import';
+export { GRAIN_AMOUNT, GRAIN_CELL, grainRgb, grainSetting, grainTone, grainY } from './grain';
+export type { Grain, GrainAmount, GrainSize } from './grain';
+export { TEAL_SKY_MIX, TEAL_SKY_STEPS, tealSkyMix, withTealSky } from './sky';

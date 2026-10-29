@@ -13,7 +13,7 @@ import { GR3X_160, openGr3xOfficial } from './profile';
 import { GR3X_PARAMETER_SETTER_LOOKS, GR3X_STANDARD_ACTIVE_CHECKS, GR3X_STANDARD_ACTIVE_CHECKS_SET0, GR3X_TONE_READS,
   GR3X_PHOTO_STYLE_SETTERS, GR3X_LOAD_CALL, GR3X_LOAD_DATA, GR3X_SAVE_CALL, GR3X_SAVE_DATA,
   GR3X_ZERO_FILL_END, GR3X_GAP, GR3X_HEAP_BASE, GR3X_R10_TONE_READS } from './look-addresses';
-import { GR3X_TONE_RECORD_TAIL, installGr3xR10Parameters, installGr3xR10PictureInfo, installGr3xR10Raw, installGr3xR10Tables } from './films-r10';
+import { GR3X_TONE_RECORD_TAIL, installGr3xR10Parameters, installGr3xR10TealHue, installGr3xR10PictureInfo, installGr3xR10Raw, installGr3xR10Tables } from './films-r10';
 import { gr3xFactoryLookOrder } from './look-layout';
 import { installGr3xGuardR10 } from './guard';
 import { gr3xRawDevelopmentWordsR10 } from './datestamp';
@@ -28,7 +28,7 @@ import { gr3xMaxId } from './geometry';
 import { monoLook } from '../aspect/lookstash';
 import { installGr3xHalationScreen } from './halation-screen';
 import { GR3X_DEVELOP_LOOK_READ, GR3X_FIRST_FILM, GR3X_HALATION_STASH, GR3X_MATRIX_CALL, GR3X_MATRIX_PROCESS, installGr3xJpegStage } from './jpeg-stage';
-import { HALATION_COLOUR_NAMES, HALATION_NAMES, halationColourIcon, halationColourScale, halationIcon, halationLight, PLAIN_LIGHT } from '../aspect/halation';
+import { HALATION_COLOUR_NAMES, HALATION_NAMES, halationColourIcon, halationColourScale, halationIcon, halationLight, PLAIN_LIGHT, TEAL_SKY_NAMES, tealSkyIcon } from '../aspect/halation';
 import { halationLightR6, halationScaleR6, PLAIN_LIGHT_R6 } from './halation-r6';
 import { sectionsOf } from '../container';
 import { gr3xOffset } from './profile';
@@ -44,6 +44,11 @@ import type { SlotParams } from '../../color/camera';
 import type { QuantizedSlot } from '../../color/camera';
 import { GR3X_FILM_NAMES, gr3xLookResources, validateGr3xLookName } from './look-resources';
 import { gr3xLookBadge } from './look-icons';
+import { gr3xFilmDefaultBytes, gr3xHasDefaults, gr3xRecipePrint, validateGr3xFilmDefaults, validateGr3xGrain } from './film-recipe';
+import type { Gr3xFilmDefaults } from './film-recipe';
+import { grainSetting } from '../../color/grain';
+import type { Grain } from '../../color/grain';
+import { tealSkyQ13 } from '../../color/sky';
 
 export interface Gr3xFilmLook {
   /** Default name (menus of languages without their own name). */
@@ -56,6 +61,10 @@ export interface Gr3xFilmLook {
   /** T6 (nine films) only: halation level of this film, fixed in the build (0 off, 1 weak, 2 strong).
    * With `filmCount` every film has the Halation line on the camera's parameter screen instead. */
   halation?: 0 | 1 | 2;
+  /** Round 10, GR Mod's film recipes (film-recipe.ts): the values the camera's parameters start from. */
+  defaults?: Gr3xFilmDefaults;
+  /** Round 10: the film's grain, fixed in the build (tools/grain/grain.c). */
+  grain?: Grain;
 }
 export interface Gr3xLookOptions {
   /** 1/2 reproduce T5/T5-L1; 3 provides nine independent T6 film slots. */
@@ -72,6 +81,13 @@ export interface Gr3xLookOptions {
    * photo set (native/slots2.c). Needs displayRevision 3 and ownParameters. Absent: the nine-film
    * T6 builds (camera-tested), byte for byte as before. */
   filmCount?: number;
+  /** Round 10, GR Mod's film recipes: a film's Hue row is its teal sky (films-r10.ts
+   * installGr3xR10TealHue): nine tone records per film, the Hue value picks one. */
+  tealHue?: boolean;
+  /** Round 10, GR Mod's Grain row (films-r10.ts, halation-rows.ts): a film's grain is set in the
+   * camera (Off / 1 / 2 / 3, starting from its recipe's amount; the size is the recipe's), and the
+   * Halation has a third colour, gold. Both live in the film's Toning byte with the Halation. */
+  grainRow?: boolean;
 }
 /** Round 7: a film's fingerprint (FNV-1a over its matrix, curves and post-curve matrix as built;
  * never 0, which an empty table holds): a film whose preset changed starts again from neutral. */
@@ -153,7 +169,7 @@ export function gr3xHalationNames(round7: boolean): string[] {
  * (GR IV's pictures; the scale drawn on GR III's own three-position scale 211, 400 x 60).
  * Round 7: the Halation and Colour rows' names (GR IV's), the halation icon, the colour scale
  * (GR IV's red and white lights drawn on scale 211) and the red and white light icons. */
-function halationResources(decoded: Uint8Array, round7: boolean, round8 = false) {
+function halationResources(decoded: Uint8Array, round7: boolean, round8 = false, gold = false, teal = false) {
   const view = new DataView(decoded.buffer, decoded.byteOffset, decoded.byteLength);
   const icons = sectionsOf(decoded).find(s => s.name === 'ICONBIN');
   if (!icons) throw new FirmwareError('unexpected-layout', 'IIIx icon section missing');
@@ -164,8 +180,12 @@ function halationResources(decoded: Uint8Array, round7: boolean, round8 = false)
   const scale = decoded.slice(icons.offset + at, icons.offset + at + 400 * 60 * 4);
   // Round 8: GR IV's names (光晕 / 光暈 too: GR III's fonts are GR IV's, byte for byte).
   const names = round8 ? [...HALATION_NAMES] : gr3xHalationNames(round7);
-  if (round7) return { texts: [names, [...HALATION_COLOUR_NAMES]], icons: [{ w: 40, h: 40, pixels: halationIcon() },
-    { w: 400, h: 60, pixels: halationColourScale(scale) }, { w: 40, h: 40, pixels: halationColourIcon('red') }, { w: 40, h: 40, pixels: halationColourIcon('white') }] };
+  // The Grain row's builds: the colour scale with a gold light between red and white, and a gold icon.
+  // The teal sky builds: the films' Hue row's name and icon (last).
+  if (round7) return { texts: [names, [...HALATION_COLOUR_NAMES], ...(teal ? [[...TEAL_SKY_NAMES]] : [])], icons: [{ w: 40, h: 40, pixels: halationIcon() },
+    { w: 400, h: 60, pixels: halationColourScale(scale, gold) }, { w: 40, h: 40, pixels: halationColourIcon('red') }, { w: 40, h: 40, pixels: halationColourIcon('white') },
+    ...(gold ? [{ w: 40, h: 40, pixels: halationColourIcon('gold') }, { w: 40, h: 40, pixels: halationColourIcon('orange') }] : []),
+    ...(teal ? [{ w: 40, h: 40, pixels: tealSkyIcon() }] : [])] };
   return { texts: [names], icons: [{ w: 40, h: 40, pixels: halationIcon() }, { w: 400, h: 60, pixels: halationScaleR6(scale) }] };
 }
 
@@ -199,6 +219,16 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   // The diagnostic halation status word is the End Screen list's mode word (0x5580437c).
   if (options.jpegDiagnostics && features.pictures?.length && features.pictureMenu === 'submenu')
     throw new FirmwareError('bad-edit', 'IIIx JPEG diagnostics and the End Screen submenu are not combined');
+  // GR Mod's film recipes: camera defaults and grain need round 10's films (looks of their own).
+  for (const f of options.films ?? []) { validateGr3xFilmDefaults(f.defaults); validateGr3xGrain(f.grain); }
+  const recipes = (options.films ?? []).some(f => gr3xHasDefaults(f.defaults)), grains = (options.films ?? []).some(f => grainSetting(f.grain) !== 0);
+  if ((recipes || grains || options.tealHue) && !round10) throw new FirmwareError('bad-edit', 'IIIx film recipes (camera defaults, grain, teal sky) need a round 10 build');
+  const tealHue = options.tealHue === true;
+  const grainRow = options.grainRow === true;
+  if (grainRow && !round10) throw new FirmwareError('bad-edit', 'IIIx Grain row needs a round 10 build');
+  if (!grainRow && (options.films ?? []).some(f => f.defaults?.halation?.gold || f.defaults?.halation?.orange)) throw new FirmwareError('bad-edit', 'IIIx gold and orange Halation need the Grain row');
+  /** The grain amount a film starts from in the camera (builds with the Grain row). */
+  const grainStart = (f: Gr3xFilmLook | undefined) => grainRow ? f?.grain?.amount ?? 0 : 0;
   const capacity = round6 ? options.filmCount! : extended ? 9 : 2;
   if ((options.films?.length ?? 0) > capacity || (extended && options.monoReplicas))
     throw new FirmwareError('bad-edit', round6 ? 'more films than the film count' : 'T6 supports nine film slots without legacy monochrome replicas');
@@ -222,7 +252,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   // Round 8: the films' names for the date imprint, as the camera's English menu shows them.
   const filmNames = round8Date ? films.map(f => f.names?.en || f.name) : undefined;
   const menu = await buildGr3xLookMenuResearch(raw, specs as Gr3xResearchLook[], displayIcons, ratioMenu, features,
-    round6 ? halationResources(decoded, round7, round8) : undefined, monoFilms, filmNames);
+    round6 ? halationResources(decoded, round7, round8, grainRow, tealHue) : undefined, monoFilms, filmNames);
   const p = GR3X_160;
   const rtos = decoded.subarray(p.rtosOffset, p.rtosOffset + p.rtosLength);
   const originalRead = (va: number, size: number) => {
@@ -255,6 +285,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   const slots = specs.map((spec, i) => {
     const id = menu.addedLooks[i].id;
     let record = 0, curves = 0, postQ9: Int16Array | undefined, quantizedCurves: QuantizedSlot['curves'] | undefined, print = 0;
+    let tealRecords: number[] | undefined;
     const curveId = 0x47430000 + id;
     if (spec.film || spec.base === 20) {
       const rec = originalRead(u32(0x55018d94 + spec.base * 4), 84);
@@ -263,12 +294,21 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
       const quantized = spec.film ? filmBytes(spec.film, matrix) : undefined;
       // HDR uses IIIx's own local-tone processing with a neutral luma matrix.
       const q = quantized?.matrixQ13 ?? Int16Array.from([2449,4809,934,2449,4809,934,2449,4809,934]);
-      const bytes = new Uint8Array(18), view = new DataView(bytes.buffer);
-      q.forEach((v, j) => view.setInt16(j * 2, v, true));
-      new DataView(rec.buffer).setUint32(4, append(bytes), true);
-      record = append(rec);
+      const matrixBytes = (m: ArrayLike<number>) => { const b = new Uint8Array(18), v = new DataView(b.buffer); Array.from(m).forEach((x, j) => v.setInt16(j * 2, x, true)); return b; };
+      if (tealHue && quantized) {
+        // A film's Hue is its teal sky: nine records (Hue 0..8, the teal step Hue - 4), the same but
+        // for the matrix, one after the other (the second matrix's hook finds a film by the range).
+        const mats = Array.from({ length: 9 }, (_, h) => append(matrixBytes(h === 4 ? q : tealSkyQ13(q, matrix, h - 4))));
+        tealRecords = mats.map((m) => { const r = rec.slice(); new DataView(r.buffer).setUint32(4, m, true); return append(r); });
+        if (tealRecords.some((r, h) => r !== tealRecords![0] + 84 * h)) throw new FirmwareError('internal', 'IIIx teal records not contiguous');
+        record = tealRecords[4];
+      } else {
+        new DataView(rec.buffer).setUint32(4, append(matrixBytes(q)), true);
+        record = append(rec);
+      }
       // Round 7: the film's fingerprint (its matrix, curves and post-curve matrix as built).
-      if (quantized) print = gr3xFilmPrint(q, quantized.curves, quantized.postQ9);
+      // GR Mod's film recipes: with starting values the fingerprint holds them too.
+      if (quantized) print = gr3xRecipePrint(gr3xFilmPrint(q, quantized.curves, quantized.postQ9), spec.film?.defaults, grainStart(spec.film));
       if (quantized) {
         const bytes = new Uint8Array(1536), v = new DataView(bytes.buffer);
         quantized.curves.forEach((c, channel) => c.forEach((x, j) => v.setUint16(channel * 512 + j * 2, x, true)));
@@ -281,7 +321,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     if (![0, 1, 2].includes(halation)) throw new FirmwareError('bad-edit', 'IIIx halation level is 0, 1 or 2');
     return { ...menu.addedLooks[i], nativeBase: spec.base, parameters: Array.from(spec.parameters),
       parameterAddress: append(spec.parameters), record, curves, curveId, renderingImplemented: true as const,
-      halation, ...(postQ9 ? { postQ9: Array.from(postQ9) } : {}), quantizedCurves, print };
+      halation, ...(postQ9 ? { postQ9: Array.from(postQ9) } : {}), quantizedCurves, print, ...(tealRecords ? { tealRecords } : {}) };
   });
   // Round 6: every film has halation, its level set in the camera (sp_hal_level gives it).
   const halationSlots = round6 ? slots : slots.filter(s => s.halation > 0);
@@ -335,8 +375,14 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
       // weak / medium / strong red, 4..6 white, 7..11 off); a film 64 + k as 32 + k. In RAW
       // development also GR IV's frame look and orientation words. Registers and flags as before, but
       // r2 (the look, a film as Standard).
+      // The Grain row (films.c GRAIN_ROW): the byte is h + 24 g; g (0..3) at bits 19..20, gold
+      // (h 12..14, strength h - 11) bit 18, orange (h 18..20, strength h - 17) bit 21, the rest of h as before.
+      const grainBits = grainRow ? `cmp r1,#95;movhi r1,#0;cmp r1,#72;subhs r1,r1,#72;orrhs r0,r0,#0x180000;bhs halation;
+        cmp r1,#48;subhs r1,r1,#48;orrhs r0,r0,#0x100000;bhs halation;cmp r1,#24;subhs r1,r1,#24;orrhs r0,r0,#0x80000;
+        halation:cmp r1,#18;blo gold;cmp r1,#20;movhi r1,#0;subls r1,r1,#17;orrls r0,r0,#0x200000;b level;
+        gold:cmp r1,#12;blo red;cmp r1,#14;movhi r1,#0;subls r1,r1,#11;orrls r0,r0,#0x40000;b level;red:` : '';
       return code(`push {r0-r5,ip,lr};mrs r4,cpsr;ldrb r2,[r3,#0x77c];mov r0,#0;sub ip,r2,#${GR3X_FIRST_FILM};cmp ip,#${capacity - 1};bhi nolevel;
-        ldrb r1,[r3,#0x786];cmp r1,#7;movhs r1,#0;cmp r1,#4;subhs r1,r1,#3;orrhs r0,r0,#0x20000;bhs level;
+        ldrb r1,[r3,#0x786];${grainBits}cmp r1,#7;movhs r1,#0;cmp r1,#4;subhs r1,r1,#3;orrhs r0,r0,#0x20000;bhs level;
         cmp r1,#3;moveq r1,#2;beq level;cmp r1,#2;moveq r1,#3;level:orr r0,r0,r1,lsl #8;
         nolevel:cmp r2,#${GR3X_FIRST_FILM};subhs ip,r2,#${GR3X_FIRST_FILM - GR3X_STASH_FILM};movlo ip,r2;orr ip,ip,r0;orr ip,ip,#0x10000;
         ${addr(1, GR3X_HALATION_STASH)}str ip,[r1];` +
@@ -445,13 +491,19 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     const layout = features.lookLayout && !isGr3xFactoryLayout(features.lookLayout, capacity) ? features.lookLayout : undefined;
     const hiddenMask = (layout?.hidden ?? []).filter(id => id >= GR3X_FIRST_FILM && id < GR3X_FIRST_FILM + capacity).reduce((m, id) => (m | (1 << (id - GR3X_FIRST_FILM))) >>> 0, 0);
     const tables = installGr3xR10Tables(r10Program, slots.filter(s => s.record).map(s => ({ id: s.id, record: s.record, iconId: s.iconId, print: s.print })));
-    const params = installGr3xR10Parameters(r10Program, { films: capacity, prints: slots.slice(0, capacity).map(s => s.print >>> 0), hiddenMask, setterSites: GR3X_PARAMETER_SETTER_LOOKS });
+    const teal = tealHue ? installGr3xR10TealHue(r10Program, { films: capacity, records: slots.slice(0, capacity).flatMap(s => {
+      if (!s.tealRecords) throw new FirmwareError('bad-edit', 'IIIx teal sky: every film needs a preset');
+      return s.tealRecords;
+    }) }) : undefined;
+    const params = installGr3xR10Parameters(r10Program, { films: capacity, prints: slots.slice(0, capacity).map(s => s.print >>> 0), hiddenMask, setterSites: GR3X_PARAMETER_SETTER_LOOKS,
+      ...(recipes || grainRow ? { defaults: Uint8Array.from(films.flatMap(f => [...gr3xFilmDefaultBytes(f.defaults, grainStart(f))])) } : {}),
+      ...(grainRow ? { grainRow: true } : {}) });
     const guard = installGr3xGuardR10({ code, patch, u32, sites }, { films: capacity, maxRatio: gr3xMaxId(menu.menu), ...(layout ? { hidden: layout.hidden } : {}),
       ...(features.adjSoftFocus ? { softFocusR10: true } : {}) }, params.moduleSymbols.sp_before_recall);
     const order = (layout ? layout.order.filter(id => !layout.hidden.includes(id)) : gr3xFactoryLookOrder(capacity));
     const raw = installGr3xR10Raw(r10Program, { films: capacity, order, module: params.moduleSymbols });
-    const info = installGr3xR10PictureInfo(r10Program, capacity, slots[0].iconId);
-    return { ...tables, ...params, ...guard, ...raw, ...info };
+    const info = installGr3xR10PictureInfo(r10Program, capacity, slots[0].iconId, grainRow);
+    return { ...tables, ...params, ...guard, ...raw, ...info, ...(teal ? { tealHue: teal } : {}) };
   })() : undefined;
   const own = adjustable && options.ownParameters === true && !round10 ? (() => {
     const native = own2 ?? GR3X_SLOTS_NATIVE;
@@ -497,6 +549,10 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   const halationRows = round7 ? installGr3xHalationRows({ code, append, patch, u32: (a: number) => u32(a), read: originalRead },
     { films: capacity, halationText: menu.extraTextIds[0], colourText: menu.extraTextIds[1], halationIcon: menu.extraIconIds[0],
       colourScale: menu.extraIconIds[1], redIcon: menu.extraIconIds[2], whiteIcon: menu.extraIconIds[3],
+      // The Grain row: kind 11's row as Grain Effect's, and the Colour row's three positions (gold).
+      // The teal sky: the films' Hue row named and drawn as it.
+      ...(tealHue ? { teal: { text: menu.extraTextIds[2], icon: menu.extraIconIds[menu.extraIconIds.length - 1] } } : {}),
+      ...(grainRow && sym ? { grain: { get: sym.sp_grain, put: sym.sp_grain_put, text: sym.sp_grain_text }, goldIcon: menu.extraIconIds[4], orangeIcon: menu.extraIconIds[5] } : {}),
       ...(sym ? { hal: sym.sp_hal, halPut: sym.sp_hal_put, halText: sym.sp_hal_text, col: sym.sp_col, colPut: sym.sp_col_put }
         : { hal: own2Entry('sp_hal'), halPut: own2Entry('sp_hal_put'), halText: own2Entry('sp_hal_text'), col: own2Entry('sp_col'), colPut: own2Entry('sp_col_put'),
           backup: own2Entry('sp_hal_backup'), restore: own2Entry('sp_hal_restore') }) }) : undefined;
@@ -519,7 +575,10 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     const identity = append(q9Bytes(Q9_IDENTITY));
     const tables = postSlots.map(s => append(q9Bytes(s.postQ9!)));
     const entry = code(`push {r0,r1,r4,lr};bl #${GR3X_MATRIX_PROCESS};pop {r0,r1};ldr r2,[r1,#8];` +
-      postSlots.map((s, k) => `${addr(3, s.record)}cmp r2,r3;${addr(1, tables[k])}beq copy;`).join('') +
+      postSlots.map((s, k) => s.tealRecords
+        // A film with nine records (teal sky by Hue): any of them.
+        ? `${addr(3, s.tealRecords[0])}cmp r2,r3;blo post${k};${addr(3, s.tealRecords[8])}cmp r2,r3;${addr(1, tables[k])}bls copy;post${k}:`
+        : `${addr(3, s.record)}cmp r2,r3;${addr(1, tables[k])}beq copy;`).join('') +
       `${addr(1, identity)}copy:add r0,r0,#0x32;mov r2,#18;bl #0x5313fd80;pop {r4,pc};`);
     patch(GR3X_MATRIX_CALL, branchWord(GR3X_MATRIX_CALL, GR3X_MATRIX_PROCESS, 14, true), branchWord(GR3X_MATRIX_CALL, entry, 14, true),
       'films: post-curve (second) matrix');
@@ -537,8 +596,11 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     halation: halationSlots.length && !round7 ? { levels: round6 ? slots.map(() => 1) : slots.slice(0, 9).map(s => s.halation),
       light: (round6 ? slots : slots.slice(0, 9)).map(s => s.quantizedCurves ? halationLightR6(s.quantizedCurves, s.postQ9) : PLAIN_LIGHT_R6) } : undefined,
     // Round 7: 0.8.2's halation (soft start, Weak / Medium / Strong, red or white) for every film.
-    ...(round7 ? { halation7: { light: slots.slice(0, capacity).map(s => s.quantizedCurves ? halationLight(s.quantizedCurves, s.postQ9) : PLAIN_LIGHT) } } : {}),
+    ...(round7 ? { halation7: { light: slots.slice(0, capacity).map(s => s.quantizedCurves ? halationLight(s.quantizedCurves, s.postQ9) : PLAIN_LIGHT), ...(grainRow ? { gold: true } : {}) } } : {}),
     diagnostics: options.jpegDiagnostics === true,
+    // The Grain row: the amount comes from the camera (the stash), the size from the recipe.
+    ...(grainRow ? { grain: { settings: films.map(f => f.grain?.size === 'large' ? 4 : 0), camera: true } }
+      : grains ? { grain: { settings: films.map(f => grainSetting(f.grain)) } } : {}),
   });
   // Round 10: the film's record comes from the descriptor's own table (films-r10.ts).
   const descriptor = round10 ? undefined : code(`push {r1-r3,ip};ldrb r2,[r7,#0x77c];` +
@@ -572,6 +634,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     ...(round7 ? { round7: true, monoFilms } : {}),
     ...(round9 ? { round9: true } : {}),
     ...(round10 ? { round10: true } : {}),
+    ...(grainRow ? { grainRow: true } : {}),
     ...(round8 ? { round8: true, ...(features.lookLayout && !isGr3xFactoryLayout(features.lookLayout, capacity) ? { lookLayout: { order: [...features.lookLayout.order], hidden: [...features.lookLayout.hidden] } } : {}) } : {}),
     // sharedParameters: films use Standard's storage (T6c). ownParameters: on top of it, each film's
     // values are swapped into that storage when it is selected (T6d).

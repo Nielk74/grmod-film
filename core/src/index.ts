@@ -23,3 +23,8 @@ export { GR3X_160, GR3_210, GR3_PROFILES, GR3X_SYMBOLS, GR3X_BLOCKERS, gr3Profil
 export type { Gr3Profile } from './fw/gr3x/profile';
 export { GFX_RATIOS, GR3X_BASE_SIZES, GR3X_MAX_CUSTOM_RATIOS, GR3X_RATIO_NAME_MAX, GR3X_T4_CUSTOM, planGr3xMenu, planGr3xRatio, validateGr3xRatioName } from './fw/gr3x/geometry';
 export { GR3X_FILM_IDS, GR3X_FILM_NAMES } from './fw/gr3x/look-resources';
+// GR III / IIIx film recipes (round 10: camera defaults and grain) and GR Mod's film library.
+export { gr3xFilmDefaultBytes, gr3xHasDefaults, validateGr3xFilmDefaults } from './fw/gr3x/film-recipe';
+export type { Gr3xFilmDefaults } from './fw/gr3x/film-recipe';
+export type { Grain, GrainAmount, GrainSize } from './color/grain';
+export * as filmpack from './filmpack';

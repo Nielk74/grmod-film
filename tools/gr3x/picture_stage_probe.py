@@ -11,13 +11,16 @@ With every patch of the manifest installed:
     halation and leaves it alone otherwise; the diagnostic date module prints on the picture.
     The configuration and the picture descriptors lie below 0x5d000000, as on the camera (part of a
     process object; the first diagnostic build refused them there and printed nothing).
+    With GR Mod's film recipes (round 10, grain): after the halation the grain module changes the
+    brightness exactly as tools/grain/check.py's reference for films with grain (the setting read
+    from the built context), the colour plane not at all, and leaves other looks alone.
   - diagnostic builds: the halation module's status word for every look (film with halation:
     done, one picture; others: why it stopped; format byte and refusal of the first picture), the
     stash and status printed in row 0 of a 720-wide picture, and nothing written into planes below
     0x5d000000.
 Synthetic objects only; JPEG encoding, the ISP and the camera's real pictures are not executed.
 """
-import argparse,hashlib,json,struct
+import argparse,hashlib,json,struct,sys
 from pathlib import Path
 from unicorn import UC_HOOK_CODE
 from unicorn import arm_const as reg
@@ -82,7 +85,7 @@ def run_execute(n,film,w,h,y,c,img=IMG):
     assert uc.reg_read(reg.UC_ARM_REG_LR)==STOP
     return bytes(uc.mem_read(img,w*h)),bytes(uc.mem_read(img+0x100000,w*h))
 
-def verify(data,manifest,reference=None):
+def verify(data,manifest,reference=None,quick=False):
     films=manifest['addedLooks'];entries=manifest['lookEntries'];calls=0;report={}
     n=StageProbe(data,manifest)
     round6=manifest.get('filmCount');round7=manifest.get('round7')
@@ -96,12 +99,24 @@ def verify(data,manifest,reference=None):
             if state>=7:return 0,0
             if state>=4:return state-3,1
             return {3:2,2:3}.get(state,state),0
+        # GR Mod's Grain row (films.c GRAIN_ROW): the byte is h + 24 g (0..95): g at bits 19..20, gold
+        # (h 12..14, strength h - 11) bit 18, orange (h 18..20, strength h - 17) bit 21, h below 12 as
+        # before, 15..17 and 21..23 off.
+        G=bool(manifest.get('grainRow'))
+        def word_of(state):
+            if G:
+                if state>95:state=0
+                g,h=state//24,state%24
+                if h>=18:return ((h-17)<<8|0x200000 if h<=20 else 0)|g<<19
+                if h>=12:return ((h-11)<<8|0x40000 if h<=14 else 0)|g<<19
+                v,w=level(h);return v<<8|(0x20000 if w else 0)|g<<19
+            v,w=level(state);return v<<8|(0x20000 if w else 0)
         for tone in NATIVE+list(range(64,84))+[0,63,84,255]:
-            for state in list(range(13))+[0x7f,0xff]:
+            for state in list(range(96 if G else 13))+[0x7f,0xff]:
                 n.uc.mem_write(STASH,b'\xa5'*4);n.descriptor(tone,state);calls+=1;cases+=1
-                v,w=level(state) if 64<=tone<64+round6 else (0,0)
                 look=tone-32 if tone>=64 else tone
-                assert u32(n.uc,STASH)==look|v<<8|(0x20000 if w else 0)|0x10000,(tone,state,hex(u32(n.uc,STASH)))
+                want=look|(word_of(state) if 64<=tone<64+round6 else 0)|0x10000
+                assert u32(n.uc,STASH)==want,(tone,state,hex(u32(n.uc,STASH)),hex(want))
         report['stash_states']=cases
     elif round7:
         # Round 7: slots3.c's settings (strength | white << 2) per film and photo set (State 'TLS3',
@@ -154,13 +169,15 @@ def verify(data,manifest,reference=None):
     # 2. Second matrix.
     if 'postMatrix' in entries:
         n.uc.mem_write(MOBJ,b'\xa5'*0x60);n.call(RESET,MOBJ);n.call(INIT,MOBJ)
-        order=[f['id'] for f in films]+NATIVE+[f['id'] for f in films][::-1]
-        for tone in order:
-            n.descriptor(tone);desc=bytes(n.uc.mem_read(OUTPUT,0xa0))
+        # (A film whose Hue is its teal sky has nine records: every Hue finds its second matrix.)
+        order=[(f['id'],4) for f in films]+[(t,4) for t in NATIVE]+[(f['id'],4) for f in films][::-1]
+        order+=[(f['id'],h) for f in films if f.get('tealRecords') for h in (0,3,5,8)]+[(t,h) for t in NATIVE[:3] for h in (0,8)]
+        for tone,hue in order:
+            n.descriptor(tone,hue=hue);desc=bytes(n.uc.mem_read(OUTPUT,0xa0))
             n.uc.mem_write(REGS,bytes(0x2000));n.call(WRAP,MOBJ,OUTPUT,REGS);calls+=1
             film=next((f for f in films if f['id']==tone),None)
             expected=film['postQ9'] if film and film.get('postQ9') else IDENTITY
-            assert n.regs_post()==expected,(tone,n.regs_post(),expected)
+            assert n.regs_post()==expected,(tone,hue,n.regs_post(),expected)
             # The pre-curve stage is the firmware's own result: the unhooked process, then the
             # register writer, on the same descriptor and module object.
             pre=n.regs_pre();saved=bytes(n.uc.mem_read(MOBJ,0x60));n.uc.mem_write(OUTPUT,desc)
@@ -190,17 +207,47 @@ def verify(data,manifest,reference=None):
             # Round 7: the stash words of the reference (film 32 + k, strength, white) as they are,
             # every film Off, another strength and colour, a native look and looks without halation.
             results={}
+            # Grain (round 10 recipes): the film's setting from the built context (look map at +44).
+            jp=entries['jpeg'];grain_map=bytes(n.uc.mem_read(jp['grainContext']+44,64)) if 'grainContext' in jp else bytes(64)
+            # The Grain row: the amount is the stash's (bits 19..20), the size the build's (the
+            # contexts' look maps hold size | amount).
+            camera='grainContexts' in jp
+            def setting(word):
+                if (word&0xff)>=64:return 0
+                if not camera:return grain_map[word&0xff]
+                a=(word>>19)&3
+                return (grain_map[word&0xff]&4)|a if a else 0
+            if 'grainContext' in jp:
+                sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'grain'))
+                from check import reference as grain_reference
+                def with_grain(plane,setting):
+                    b=bytearray(plane);grain_reference(b,w,h,w,setting);return bytes(b)
             words=[(11,False),(11|3<<8|0x20000,False),((32+round6)|2<<8,False),(63|1<<8,False),(31|3<<8,False)]
-            words+=[(32+k|v<<8|w,v>0) for k in range(round6) for v,w in ((0,0),(1+k%3,0),(3-k%3,0x20000))]
-            words+=[(wd,True) for wd in expected]
+            # --quick: the first three films only (every film runs the same code; only its light differs).
+            nf=min(3,round6) if quick else round6
+            refs=[wd for wd in expected if not 32<=(wd&0xff)<32+round6 or (wd&0xff)<32+nf]
+            words+=[(32+k|v<<8|w,v>0) for k in range(nf) for v,w in ((0,0),(1+k%3,0),(3-k%3,0x20000))]
+            words+=[(wd,True) for wd in refs]
+            if camera:
+                words+=[((32+k)|g<<19,False) for k in range(nf) for g in (1,2,3)]
+                words+=[(wd|g<<19,True) for wd in (refs if quick else refs[:6]) for g in (1,3)]+[(11|2<<19,False)]
+            grained=0
             for word,changes in words:
                 Y,C=run_execute(n,word|0x10000,w,h,y,c);calls+=1
-                if word in expected:assert (Y,C)==expected[word][:2],hex(word)
-                if changes:assert Y!=y and len(n.log['alloc'])>0,hex(word)
+                g=setting(word);base=word&~0x180000
+                if base in expected:
+                    ey,ec=expected[base][:2]
+                    assert (Y,C)==((with_grain(ey,g) if g&3 else ey),ec),hex(word)
+                elif g&3 and not changes:assert (Y,C)==(with_grain(y,g),c),hex(word)
+                # On this small picture weak grain can average out to nothing (as on the thumbnail).
+                visible=bool(g&3) and with_grain(y,g)!=y
+                if visible:grained+=1
+                if changes or visible:assert Y!=y and len(n.log['alloc'])>0,hex(word)
                 else:assert (Y,C)==(y,c),hex(word)
                 assert len(n.log['alloc'])==n.log['free']
                 results[hex(word)]=dict(changed_luma=sum(a!=b for a,b in zip(Y,y)),allocs=len(n.log['alloc']),frees=n.log['free'],invalidate=n.log['invalidate'],clean=n.log['clean'])
             report['jpeg_stage']=results;report['halation_matches_reference']=bool(expected);runs=[]
+            if 'grainContext' in jp:report['grain_matches_reference']=grained
         for tone,level in runs:
             film=next((f for f in films if f['id']==tone),None)
             if not film:level_in=level;level=0
@@ -243,6 +290,7 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for s in ('rtos','manifest','report'):p.add_argument('--'+s,type=Path,required=True)
     p.add_argument('--reference',type=Path)
-    a=p.parse_args();result=verify(a.rtos.read_bytes(),json.loads(a.manifest.read_text()),a.reference)
+    p.add_argument('--quick',action='store_true',help='JPEG step: the first three films only')
+    a=p.parse_args();result=verify(a.rtos.read_bytes(),json.loads(a.manifest.read_text()),a.reference,a.quick)
     with a.report.open('x') as f:json.dump(result,f,indent=2);f.write('\n')
     print(json.dumps(result,indent=2))

@@ -80,6 +80,8 @@ import { readGr3xLookRecipe } from '../fw/gr3x/look-recipe';
 import type { Gr3xLookOptions } from '../fw/gr3x/image-control';
 import { GR3X_MAX_FILMS } from '../fw/gr3x/image-control';
 import { convertGr3xCube, convertGr3xXmp } from '../color/gr3x-import';
+import type { Gr3xFilmDefaults } from '../fw/gr3x/film-recipe';
+import type { Grain } from '../color/grain';
 import type { CameraModel } from '../wallpaper';
 
 export const SHUTDOWN_W = 720;
@@ -120,6 +122,8 @@ export interface FirmwareInfo {
   version: string;
   sha256: string;
   slots: SlotInfoView[];
+  /** The camera's Standard matrix in Q13 (row-major): what `quantizeSlot` composes a film's matrix with. */
+  standardMatrixQ13: number[];
   tiles: { film: Uint8Array; plain: Uint8Array };
   contentArea: typeof CONTENT_AREA;
   /** Characters usable in names, per language. */
@@ -164,6 +168,11 @@ export interface SlotRequest {
    * the Halation row). GR III / IIIx legacy builds (no film count): level fixed in the build (0 off,
    * 1 weak, 2 strong); with a film count every film has it, set in the camera. */
   halation?: boolean | 0 | 1 | 2;
+  /** GR III 2.10 / IIIx 1.60 with a film count (round 10): GR Mod's film recipe, the values the
+   * camera's parameters start from for this film (Sharpness, Shading, Clarity, Halation, ...). */
+  defaults?: Gr3xFilmDefaults;
+  /** GR III 2.10 / IIIx 1.60 with a film count (round 10): the film's grain, fixed in the build. */
+  grain?: Grain;
 }
 
 /** Soft focus on one negative clarity setting: its row of the clarity table gets the gains of `strength`. */
@@ -216,6 +225,9 @@ export interface FirmwareSummary {
     colorChanged: boolean;
     nameChanged: boolean;
     iconChanged: boolean;
+    /** GR III films: the recipe's camera defaults and grain, when the file has them. */
+    defaults?: Gr3xFilmDefaults;
+    grain?: Grain;
   }[];
   /** Aspect ratios this file adds to the camera (empty when none, or when they cannot be read). */
   ratios: BuiltRatio[];
@@ -235,6 +247,10 @@ export interface FirmwareSummary {
   lookLayout?: LookLayout;
   /** True when the file adds Direct Flash, a fifth Flash Mode (0.8.4). */
   directFlash?: boolean;
+  /** GR III / IIIx: true when the films' Hue row is their teal sky (BuildOptions.tealHue). */
+  tealHue?: boolean;
+  /** GR III / IIIx: true when the films have the Grain row and gold Halation (BuildOptions.grainRow). */
+  grainRow?: boolean;
 }
 
 /** Additions besides the slots and the ratios. */
@@ -268,6 +284,12 @@ export interface BuildOptions {
   /** GR III 2.10: the number of films, 1..20 (`features.maxFilms`), each with a Halation
    * line in the camera. Absent: the nine-film T6 build. */
   filmCount?: number;
+  /** GR III / IIIx with a film count (round 10): each film's Hue row in the camera is its teal sky
+   * (-4..+4, color/sky.ts) instead of turning every colour; every film needs a preset. */
+  tealHue?: boolean;
+  /** GR III / IIIx with a film count (round 10): each film gets a Grain row in the camera (Off / 1 / 2 / 3,
+   * starting from its recipe's grain amount, the size the recipe's) and a third Halation colour, gold. */
+  grainRow?: boolean;
 }
 
 export interface ShutdownImage {
@@ -415,7 +437,7 @@ export class Engine {
         slots: GR3X_FILM_IDS.slice(0, profile.fullFeatures ? GR3X_MAX_FILMS : 9).map((id, i) => ({
           id, defaultName: GR3X_FILM_NAMES[i], icon: lookResources.film.slice(),
           names: Object.fromEntries(LANGS.map(l => [l, { text: GR3X_FILM_NAMES[i], capacity: 24 }])) as SlotInfoView['names'],
-        })), tiles: lookResources.tiles, contentArea: CONTENT_AREA,
+        })), standardMatrixQ13: Array.from(lookResources.matrix), tiles: lookResources.tiles, contentArea: CONTENT_AREA,
         allowed: Object.fromEntries(LANGS.map(l => [l, gr3xAllowedChars(decoded, l)])) as Record<LangCode, string>,
         shutdown: Object.fromEntries([profile.model, profile.standardModel].map(m => [m, { size: resource.length, sampling: samplingOf(data), data }])), factoryEntry: readGr3xFactoryEntry(decoded, profile),
       };
@@ -463,6 +485,7 @@ export class Engine {
       version: FIRMWARE_VERSION,
       sha256: await sha256Hex(raw),
       slots,
+      standardMatrixQ13: Array.from(mStd),
       tiles: { film: tileTemplate(decoded, 'film'), plain: tileTemplate(decoded, 'plain') },
       contentArea: CONTENT_AREA,
       allowed,
@@ -559,10 +582,13 @@ export class Engine {
           icon: looks!.films?.[i]?.icon ?? s.icon, colorChanged: !!(looks!.films?.[i]?.preset || looks!.films?.[i]?.params),
           nameChanged: (!!looks!.films?.[i]?.name && looks!.films?.[i]?.name !== GR3X_FILM_NAMES[i]) || !!looks!.films?.[i]?.names,
           iconChanged: !!looks!.films?.[i]?.icon,
+          ...(looks!.films?.[i]?.defaults ? { defaults: looks!.films![i].defaults } : {}),
+          ...(looks!.films?.[i]?.grain ? { grain: looks!.films![i].grain } : {}),
         })) : [], ratios: matched ? candidate!.ratios : [], softFocus: matched ? softFocus : [],
         adjSoftFocus: matched && adjSoftFocus, dateStamp: matched && dateImprint, monoUnlock: matched && looks?.monoReplicas === true, extraSlots: [],
         ...(matched && pictures.length ? { shutdownPictures: pictures.map((p, k) => ({ id: p.id ?? k + 1, name: p.name, jpeg: p.jpeg })) } : {}),
-        ...(matched && lookLayout ? { lookLayout: { order: [...lookLayout.order], hidden: [...lookLayout.hidden] } } : {}) };
+        ...(matched && lookLayout ? { lookLayout: { order: [...lookLayout.order], hidden: [...lookLayout.hidden] } } : {}),
+        ...(matched && looks?.tealHue ? { tealHue: true } : {}), ...(matched && looks?.grainRow ? { grainRow: true } : {}) };
     }
     if (raw.length === BRIDGE_SIZE && sha256 === BRIDGE_SHA256) return { sha256, kind: 'bridge', changedBytes: 0, verified: true, slots: [], ratios: [], softFocus: [], adjSoftFocus: false, dateStamp: false, monoUnlock: false, extraSlots: [] };
     const describe = (d: Uint8Array): FirmwareSummary['slots'] =>
@@ -882,7 +908,7 @@ export class Engine {
   /** Build a firmware file. The result has passed the built-in self-check (otherwise this throws). */
   async buildFirmware(requests: SlotRequest[], ratios: readonly RatioSpec[] = [], softFocus: readonly SoftFocusRequest[] = [], options: BuildOptions = {}): Promise<FirmwareBuild> {
     if (this.info.family === 'gr3x') {
-      if (Object.entries(options).some(([k, v]) => k !== 'monoUnlock' && k !== 'adjSoftFocus' && k !== 'dateStamp' && k !== 'shutdownPictures' && k !== 'filmCount' && k !== 'guard' && k !== 'lookLayout' && k !== 'gr3Round' && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)))
+      if (Object.entries(options).some(([k, v]) => k !== 'monoUnlock' && k !== 'adjSoftFocus' && k !== 'dateStamp' && k !== 'shutdownPictures' && k !== 'filmCount' && k !== 'tealHue' && k !== 'grainRow' && k !== 'guard' && k !== 'lookLayout' && k !== 'gr3Round' && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)))
         throw new FirmwareError('gr3x-unsupported', 'added Image Control slots and the test settings of the date imprint are not ported to GR III / IIIx');
       if (options.shutdownPictures?.length && !this.info.capabilities.menuPictures)
         throw new FirmwareError('gr3x-unsupported', 'this GR III / IIIx file has no End Screen pictures');
@@ -892,6 +918,8 @@ export class Engine {
       const menu = planGr3xMenu(ratios.map(r => ({ ratio: r.ratio, name: r.name })));
       // 0: no films (as when nothing is chosen).
       const filmCount = options.filmCount || undefined;
+      if (options.tealHue && filmCount === undefined) throw new FirmwareError('bad-edit', 'the films\' teal sky needs a film count');
+      if (options.grainRow && filmCount === undefined) throw new FirmwareError('bad-edit', 'the films\' Grain row needs a film count');
       if (options.filmCount === 0 && requests.length) throw new FirmwareError('bad-edit', 'film changes without films');
       if (filmCount !== undefined && (options.monoUnlock || !Number.isInteger(filmCount) || filmCount < 1 || filmCount > (this.info.features.maxFilms ?? 9) || filmCount > GR3X_MAX_FILMS || (this.info.features.maxFilms ?? 9) < GR3X_MAX_FILMS))
         throw new FirmwareError('bad-edit', 'the number of films is 1..20');
@@ -905,6 +933,8 @@ export class Engine {
         // Each film keeps its own parameters (T6d); recipes without the flag rebuild T6c.
         ...(options.monoUnlock ? {} : { ownParameters: true }),
         ...(filmCount !== undefined ? { filmCount } : {}),
+        ...(options.tealHue && filmCount !== undefined ? { tealHue: true } : {}),
+        ...(options.grainRow && filmCount !== undefined ? { grainRow: true } : {}),
         films: ids.map((slot, i) => {
           const r = requests.find(r => r.slot === slot);
           // Each camera language may have its own name. Languages without one show the default:
@@ -913,7 +943,9 @@ export class Engine {
           const ascii = given.find(([l, v]) => l === 'en' && /^[\x20-\x7e]+$/.test(v)) ?? given.find(([, v]) => /^[\x20-\x7e]+$/.test(v));
           const name = ascii?.[1] ?? GR3X_FILM_NAMES[i]; validateGr3xLookName(name);
           const own = Object.fromEntries(given.filter(([, v]) => v !== name));
+          if ((r?.defaults || r?.grain) && filmCount === undefined) throw new FirmwareError('bad-edit', 'film recipes need a film count');
           return { name, ...(Object.keys(own).length ? { names: own } : {}), ...(r?.preset ? { preset: r.preset } : {}), ...(r?.icon ? { icon: r.icon } : {}),
+            ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain && r.grain.amount ? { grain: r.grain } : {}),
             // Round 6: Halation is set in the camera (each film has the line).
             ...(typeof r?.halation === 'number' && r.halation > 0 && filmCount === undefined ? { halation: r.halation as 1 | 2 } : {}) };
         }),
@@ -946,6 +978,7 @@ export class Engine {
     const cinemaHalation: Partial<Record<'CY' | 'CG', true>> = {};
     for (const r of requests) {
       if (r.slot !== 'CY' && r.slot !== 'CG') throw new FirmwareError('bad-edit', 'IIIx film slot is not a GR IV slot');
+      if (r.defaults || r.grain) throw new FirmwareError('bad-edit', 'film recipes (camera defaults, grain) are GR III / IIIx only');
       if (r.halation !== undefined && r.halation !== false) {
         if (r.halation !== true) throw new FirmwareError('bad-halation', `${r.slot}: halation is on or off`);
         if (!r.preset) throw new FirmwareError('bad-halation', `${r.slot}: halation needs a preset`);
