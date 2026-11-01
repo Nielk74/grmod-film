@@ -58,16 +58,30 @@ function pushColour(x: RGB, f: RGB, k: number): [number, number] {
   return [c * Math.cos(h), c * Math.sin(h)];
 }
 
+/** A setting that may depend on the colour's OkLab hue (degrees, 0-360: skin 29-60, yellow 110, green 142, cyan 195, blue 264). */
+export type Hued = number | ((hue: number) => number);
+const at = (v: Hued, hue: number) => (typeof v === 'number' ? v : v(hue));
+
+/** Warm colours (skin, reds, oranges, up to yellow) get `warm`, greens through blues and purples get `cool`;
+ * the changes are broad (40 degrees) so the camera's matrix and curves can follow them. */
+export const warmCool = (warm: number, cool: number): Hued => hue => {
+  const w = smooth(85, 125, hue) * (1 - smooth(315, 350, hue));
+  return warm + (cool - warm) * w;
+};
+
 /** `colour`: how far the film's colour change is pushed (1: as the film; v3: 1.5); `midSaturation`: the
- * interlayer saturation in the midtones (v3: 0.12). Lower values keep skin closer to Standard. */
-export function filmResponse(op: Op, colour = 1.5, midSaturation = 0.12): Op {
+ * interlayer saturation in the midtones (v3: 0.12). Lower values keep skin closer to Standard. Either may
+ * depend on the hue; near neutral they take their value at skin's hue, so grey ramps keep one tint. */
+export function filmResponse(op: Op, colour: Hued = 1.5, midSaturation: Hued = 0.12): Op {
   return c => {
     const x = lab(c), f = lab(op(c));
     const mid = smooth(0.2, 0.45, x[0]) * (1 - smooth(0.75, 0.95, x[0]));
     let L = x[0] + (1 + 0.5 * mid) * (f[0] - x[0]);
     L += 0.18 * (L - 0.5) * mid;
-    const [a, b] = pushColour(x, f, colour);
-    const s = (1 + midSaturation * mid) * (1 - 0.2 * smooth(0.82, 1, L));
+    const hue = ((Math.atan2(x[2], x[1]) * 180) / Math.PI + 360) % 360, chromatic = smooth(0.01, 0.04, Math.hypot(x[1], x[2]));
+    const mixed = (v: Hued) => at(v, 45) + chromatic * (at(v, hue) - at(v, 45));
+    const [a, b] = pushColour(x, f, mixed(colour));
+    const s = (1 + mixed(midSaturation) * mid) * (1 - 0.2 * smooth(0.82, 1, L));
     return display(L, a * s, b * s);
   };
 }
