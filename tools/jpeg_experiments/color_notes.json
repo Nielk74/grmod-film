@@ -1,0 +1,180 @@
+{
+  "basis": "Offline original colour interpretations; display sRGB input/output, no camera or measured film reproduction claim",
+  "signature_contract": {
+    "shape": "(...,3), including HxWx3 and Nx3",
+    "dtype": "new float32 output; input and LUT never mutated",
+    "range": "[0,1]",
+    "sanitization": "NaN/-inf -> 0, +inf -> 1, out-of-range RGB clipped",
+    "strength": "finite [0,1]; zero is exact sanitized identity",
+    "chunk_pixels": 131072,
+    "memory_note": "A 6000x4000 float32 input/output pair is 576 MB; scratch is bounded to one chunk; noncontiguous or non-float32 input may add a contiguous copy",
+    "small_strength": "Strength <= float32 epsilon (approximately 1.19e-7) returns sanitized identity to avoid roundtrip noise and underflow."
+  },
+  "parameters": {
+    "colour_density": {
+      "default_strength": 0.6,
+      "max_OkLab_L_reduction_at_full_strength": 0.045,
+      "max_chroma_gain_at_full_strength": 0.065,
+      "chroma_mask_smoothstep": [
+        0.025,
+        0.18
+      ],
+      "skin_protection": 0.84
+    },
+    "blue_density": {
+      "default_strength": 0.5,
+      "hue_centre_deg": 250,
+      "hue_half_width_deg": 72,
+      "max_OkLab_L_reduction_at_full_strength": 0.065,
+      "intentional_hue_shift_deg": 0,
+      "gamut_limit": "At extreme boundaries smooth linear-RGB chroma contraction can shift perceptual hue slightly"
+    },
+    "highlight_gamut": {
+      "default_strength": 0.5,
+      "OkLab_L_knee": 0.7,
+      "shoulder_alpha": ".42 * strength",
+      "linear_RGB_radial_gamut_knee": "1 - .24*strength + .12*strength^2",
+      "limitation": "Reshapes existing JPEG highlights; cannot recover clipped capture detail"
+    },
+    "skin_tone_colour": {
+      "default_strength": 0.5,
+      "skin_hue_centre_deg": 52,
+      "skin_hue_half_width_deg": 62,
+      "skin_chroma_on": [
+        0.006,
+        0.025
+      ],
+      "skin_chroma_off": [
+        0.15,
+        0.24
+      ],
+      "skin_protection": 0.9,
+      "max_midtone_chroma_gain": 0.09,
+      "max_shadow_chroma_reduction": 0.08,
+      "max_highlight_chroma_reduction": 0.14,
+      "deliberate_neutral_tint": "OkLab shadow (a,b)=(-.0025,-.005), highlight=(.002,.005), scaled by strength and brightness masks; black/white anchored",
+      "limitation": "Colour heuristic, not face/skin segmentation; warm objects can also receive protection"
+    },
+    "gamut_projection": {
+      "method": "Analytic linear-RGB ray contraction about neutral L^3; C1 exponential knee",
+      "generic_knee": "1 - .015 * strength",
+      "reason": "Avoids non-convex OkLab blue-gamut branch jumps"
+    },
+    "lut": {
+      "default_size": 17,
+      "higher_fidelity_size": 33,
+      "ordering": "lut[r,g,b,channel]",
+      "interpolation": "true 8-corner trilinear interpolation",
+      "target": "density(.45) -> blue(.35) -> skin_tone(.45) -> highlight_gamut(.35)",
+      "signature": "build_lut(size=17), apply_lut(rgb,lut), lut_target(rgb)"
+    }
+  },
+  "synthetic_validation": {
+    "samples": 120000,
+    "domain": "uniform display sRGB RGB cube [0,1]",
+    "seed": 2026,
+    "lut_fidelity": {
+      "17": {
+        "mean_absolute_rgb": 0.0009503070614300668,
+        "p99_absolute_channel": 0.011190892197191715,
+        "max_absolute_channel": 0.03528652340173721
+      },
+      "33": {
+        "mean_absolute_rgb": 0.0002745064557529986,
+        "p99_absolute_channel": 0.003712891601026058,
+        "max_absolute_channel": 0.017996083945035934
+      }
+    },
+    "operations": {
+      "colour_density": {
+        "mean_abs_change": 0.028945177793502808,
+        "mean_rgb_shift": [
+          -0.02865547500550747,
+          -0.02982429601252079,
+          -0.02725646086037159
+        ],
+        "range": [
+          0.0,
+          0.9996997714042664
+        ]
+      },
+      "blue_density": {
+        "mean_abs_change": 0.006547457072883844,
+        "mean_rgb_shift": [
+          -0.00530580710619688,
+          -0.00681005185469985,
+          -0.006588637828826904
+        ],
+        "range": [
+          0.0,
+          0.9999217391014099
+        ]
+      },
+      "highlight_gamut": {
+        "mean_abs_change": 0.007305320352315903,
+        "mean_rgb_shift": [
+          0.00254456396214664,
+          -0.0006394144147634506,
+          0.004038747865706682
+        ],
+        "range": [
+          0.0006004740134812891,
+          0.9910960793495178
+        ]
+      },
+      "skin_tone_colour": {
+        "mean_abs_change": 0.011714407242834568,
+        "mean_rgb_shift": [
+          -0.006133531220257282,
+          -0.005279699806123972,
+          0.006137017160654068
+        ],
+        "range": [
+          0.0,
+          0.9999997019767761
+        ]
+      }
+    },
+    "saturated_blue_ramp_max_step": 2.286583185195923e-05,
+    "full_resolution": {
+      "shape": [
+        4000,
+        6000,
+        3
+      ],
+      "function": "lut_target",
+      "seconds": 19.636634499998763,
+      "finite": true,
+      "representative_output": [
+        0.17306309938430786,
+        0.4429861009120941,
+        0.767345130443573
+      ]
+    }
+  },
+  "focused_tests": {
+    "command": "python -m pytest tools/jpeg_experiments/test_color_ops.py -q",
+    "result": "25 passed",
+    "coverage": [
+      "zero-strength identity",
+      "neutrals",
+      "nonmutation",
+      "finite bounds",
+      "skin safeguards",
+      "selective blue independence",
+      "smooth hue/neutral masks",
+      "monotone shoulder",
+      "smooth saturated highlight ramp",
+      "graded tint endpoints",
+      "identity LUT",
+      "all eight trilinear corners",
+      "axis ordering",
+      "17-cube fidelity",
+      "blue gamut cusp regression",
+      "chunk equivalence",
+      "invalid-input contract",
+      "tiny-strength numerical stability"
+    ]
+  },
+  "test_first_record": "Initial module-not-found collection failure before implementation; saturated-blue regression then reproduced a .131 channel jump before radial projection fix, and passes after."
+}
