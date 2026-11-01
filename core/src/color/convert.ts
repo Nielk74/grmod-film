@@ -52,6 +52,14 @@ export interface ConvertOptions {
    * clearly closer while greys and skin get at most a little worse (`huePasses`). Off unless given.
    */
   hueStd?: number[][];
+  /**
+   * GR III / IIIx .cube only: that many extra copies of a 41-step grey ramp over the dark (0-0.2) and the light
+   * (0.75-1) ends in the fit (default 0: the fit as before). The fit's own samples have few greys at the ends,
+   * so a look's tinted white (cream highlights) and tinted black came out nearly neutral; with 24 copies they
+   * are held (Portra 400's film response: white b* 3.2 -> 5.6 against 7.0 wanted) for a little more error in
+   * saturated colours (validation mean 2.16 -> 2.18).
+   */
+  endGreyWeight?: number;
 }
 
 /** Mean / p95 of CIE76 and CIEDE2000 between two buffers. */

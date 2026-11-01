@@ -1,0 +1,95 @@
+{
+  "verification_date": "2026-10-31",
+  "source_path": "C:\\Users\\Antoine\\Pictures\\Ricoh2\\AK000001.DNG",
+  "source_sha256_before": "e57bb017cc081e59c7938db2aa9564259ae0c5e89ffc5b42a51d30083eb9561c",
+  "source_sha256_after": "e57bb017cc081e59c7938db2aa9564259ae0c5e89ffc5b42a51d30083eb9561c",
+  "source_modified": false,
+  "rawpy_version": "0.27.1",
+  "libraw_version": [
+    0,
+    22,
+    1
+  ],
+  "dimensions": {
+    "width": 2012,
+    "height": 3010
+  },
+  "decoder_settings": {
+    "demosaic_algorithm": "AHD",
+    "half_size": true,
+    "four_color_rgb": false,
+    "fbdd_noise_reduction": "Off",
+    "noise_thr": null,
+    "median_filter_passes": 0,
+    "use_camera_wb": true,
+    "use_auto_wb": false,
+    "user_wb": null,
+    "output_color": "sRGB",
+    "output_bps": 16,
+    "user_flip": null,
+    "no_auto_bright": true,
+    "no_auto_scale": false,
+    "adjust_maximum_thr": 0.0,
+    "bright": 1.0,
+    "highlight_mode": "Clip",
+    "exp_shift": 0.25,
+    "exp_preserve_highlights": 0.0,
+    "gamma": [
+      1,
+      1
+    ]
+  },
+  "measured_ordinary_channels": 10157775,
+  "measurements": [
+    {
+      "exp_shift": 1.0,
+      "decoded_container_maximum": 1.0,
+      "restored_scene_maximum": 1.0,
+      "ordinary_channel_ratio_to_unshifted_q01_q50_q99": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pixels_with_scene_channel_above_one": 0,
+      "container_ceiling_channels": 512
+    },
+    {
+      "exp_shift": 0.5,
+      "decoded_container_maximum": 0.6801556348800659,
+      "restored_scene_maximum": 1.3603112697601318,
+      "ordinary_channel_ratio_to_unshifted_q01_q50_q99": [
+        0.4993060529232025,
+        0.4998864531517029,
+        0.5002223253250122
+      ],
+      "pixels_with_scene_channel_above_one": 429,
+      "container_ceiling_channels": 0
+    },
+    {
+      "exp_shift": 0.25,
+      "decoded_container_maximum": 0.34006255865097046,
+      "restored_scene_maximum": 1.3602502346038818,
+      "ordinary_channel_ratio_to_unshifted_q01_q50_q99": [
+        0.24919390678405762,
+        0.24983683228492737,
+        0.25014999508857727
+      ],
+      "pixels_with_scene_channel_above_one": 429,
+      "container_ceiling_channels": 0
+    }
+  ],
+  "interpretation": "Quarter and half exposure decodes show the expected linear scaling in ordinary channels. Dividing the quarter-exposure decode by 0.25 restores the shared normalization while retaining real RGB values above 1; the unshifted rendering clips some of these channels. This is a LibRaw offline rendering comparison, not a different camera capture or a sensor highlight reconstruction.",
+  "rendering_formulas": {
+    "baseline": "standard sRGB transfer applied after clipping scene * exposure to [0,1]",
+    "protected": "max-channel knee=0.5; target peak=0.5+0.5*(p-0.5)/(0.5+(p-0.5)) above knee; uniformly scale RGB to target peak; blend this linear RGB with the ordinarily clipped scene using strength, then standard sRGB transfer",
+    "recipe": "gains=exp([warmth+tint/2,-tint,-warmth+tint/2]); normalize gains to weighted sum 1 with [0.2126,0.7152,0.0722]; multiply already-WB linear sRGB and render_protected strength=0.7"
+  },
+  "limitations": [
+    "Offline experiment, not a camera-verified JPEG engine or a new capture exposure.",
+    "Sensor-saturated samples and detail already clipped in camera cannot be recovered.",
+    "LibRaw's output conversion clips negative RGB; this is not a full floating-point wide-gamut RAW development pipeline.",
+    "The 16-bit quarter-exposure output trades two bits of container precision for two stops of container headroom.",
+    "Half-size development changes demosaicing and pixel scale; matched comparisons must use the same decode."
+  ],
+  "fixture_command": "$env:GRMOD_TEST_DNG='C:\\Users\\Antoine\\Pictures\\Ricoh2\\AK000001.DNG'; & 'scratch\\jpeg-experiments-env\\Scripts\\python.exe' -m pytest tools/jpeg_experiments/test_raw_ops.py -q"
+}

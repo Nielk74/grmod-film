@@ -30,7 +30,8 @@ FLAGS = ['-mcpu=cortex_a9' if USE_ZIG else '-mcpu=cortex-a9', '-marm', '-mfloat-
 
 def tools():
     if not USE_ZIG:
-        return ['clang', '-target', 'armv7-none-eabi'], ['ld.lld'], ['llvm-objcopy']
+        # resolved paths: on Windows 'ld.lld' (an extension, .lld) is not found without its .exe
+        return [shutil.which('clang'), '-target', 'armv7-none-eabi'], [shutil.which('ld.lld')], [shutil.which('llvm-objcopy')]
     z = [sys.executable, '-m', 'ziglang']
     return z + ['cc', '-target', 'arm-freestanding-eabi'], z + ['ld.lld'], z + ['objcopy']
 
