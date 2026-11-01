@@ -6,15 +6,24 @@
  *  - every film pushed by "film response" (response.ts) instead of shipped as authored; a film whose
  *    pushed version the camera cannot hold (fit mean over 3 dE2000, or a post matrix beyond 12 bits)
  *    stays as authored;
- *  - film 1 (Velvia, which the user dropped) replaced by "Portra Print": Kodak Portra 400 on Portra
- *    Endura paper, from stock datasheet data through tools/jpeg_experiments/film_datasheet_v3.py
- *    (the data is spektrafilm's, CC BY-SA 4.0: this .cube is not part of the repository);
- *  - halation reshaped: a wider, softer glow that starts earlier (spread 0.6 % and 3.5 % of the
- *    width, mostly the wide one, from level 200), with gains lowered to keep its strength; its
- *    colour stays the camera's choice (red, orange, gold, white).
- * The grain is unchanged (the new grain needs a new camera module).
+ *  - film 1 (Velvia, which the user dropped) replaced by "Pro 400H": Fujifilm Pro 400H on Fujicolor
+ *    Crystal Archive paper, from stock datasheet data through tools/jpeg_experiments/film_datasheet_v3.py
+ *    (the data is spektrafilm's, CC BY-SA 4.0: this .cube is not part of the repository). An earlier
+ *    v3 had "Portra Print" here; the user prefers Portra 400's film response (film 12);
+ *  - halation reshaped: a wider, softer glow (spread 0.6 % and 3.5 % of the width, mostly the wide
+ *    one) that starts near clipping (level 228: a first v3 started at 200 and washed large lit areas,
+ *    tools/jpeg_experiments/halation_v3.py PROPOSED2), gains lowered to keep its strength; its colour
+ *    stays the camera's choice (red, orange, gold, white);
+ *  - grain v2 (tools/grain/grain.c: tiles from the Boolean film grain model, colour grain, strongest in
+ *    the shadows and lower midtones), Portra 400 one step up (Medium, as Kodak's Print Grain Index
+ *    suggests);
+ *  - film sharpness (MTF) through the camera's own controls: Sharpness at most -1 (less of the camera's
+ *    sharpening), Clarity +1 where a film does not set it (development's edge effects). The controls'
+ *    exact response is not checked on a camera.
+ * Not in the firmware: shoot films with Highlight Correction (D-Range) on in contrasty light; it is the
+ * camera's own film latitude (one stop less exposure, pushed back in the JPEG) and a camera-wide setting.
  *
- *   npx vite-node examples/gr3x/film-pack-v3/build.ts OFFICIAL.bin PORTRA_PRINT.cube PICTURES_DIR OUT
+ *   npx vite-node examples/gr3x/film-pack-v3/build.ts OFFICIAL.bin PRO_400H.cube PICTURES_DIR OUT
  *
  * PICTURES_DIR: the End Screen pictures (.bgr) from ../film-pack/pictures.ps1.
  */
@@ -35,15 +44,15 @@ import { filmResponse } from './response';
 const PICTURE_NAMES = ['Star Trails', 'Film Strip', 'Contours', 'Aperture', 'Synthwave', 'Bauhaus', 'Great Wave', 'Good Night'];
 const MAX_FIT = 3.0;
 
-const [official, printCube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
-if (!official || !printCube || !pictureDir || !out) {
-  console.error('usage: build.ts OFFICIAL.bin PORTRA_PRINT.cube PICTURES_DIR OUT'); process.exit(2);
+const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
+if (!official || !film1Cube || !pictureDir || !out) {
+  console.error('usage: build.ts OFFICIAL.bin PRO_400H.cube PICTURES_DIR OUT'); process.exit(2);
 }
 
 // Halation, reshaped for this build only (the shared constants are read when the firmware is built).
 const H = HALATION as unknown as { start: number; narrow: number; wide: number; mix: number; gain: number[] };
 const shipped = { start: H.start, narrow: H.narrow, wide: H.wide, mix: H.mix, gain: [...H.gain] };
-H.start = 200; H.narrow = 0.006; H.wide = 0.035; H.mix = 0.3;
+H.start = 228; H.narrow = 0.006; H.wide = 0.035; H.mix = 0.3;
 H.gain = shipped.gain.map(g => +(g * 0.78).toFixed(2));
 console.log('halation', JSON.stringify({ shipped, v3: { start: H.start, narrow: H.narrow, wide: H.wide, mix: H.mix, gain: H.gain } }));
 
@@ -53,9 +62,18 @@ if (engine.info.family !== 'gr3x' || (engine.info.features.maxFilms ?? 0) < LOOK
 const { decoded } = await openGr3xOfficial(raw);
 const tile = gr3xLookResources(decoded).tiles.film;
 
-const portra = LOOKS.find(l => l.name === 'Portra 400')!;
-const printLook: Look = { ...portra, name: 'Portra Print', caption: 'PRINT',
-  about: 'Kodak Portra 400 printed on Portra Endura, from the stocks\' datasheets: dense warm skin, deep blacks, print contrast.' };
+const proNegHi = LOOKS.find(l => l.name === 'Pro Neg Hi')!;
+const film1: Look = { ...proNegHi, name: 'Pro 400H', caption: 'PRO 400H', code: '4H',
+  about: 'Fujifilm Pro 400H on Crystal Archive paper, from the stocks\' datasheets: cyan-teal skies, slightly green highlights, dense greens.',
+  recipe: { defaults: { sharpness: -1 }, grain: { amount: 1, size: 'small' } } };
+
+/** v3's recipe changes: Portra 400 one grain step up (Kodak's Print Grain Index), and film sharpness:
+ * Sharpness at most -1, Clarity +1 where the film does not set it. */
+function v3Recipe(look: Look): NonNullable<Look['recipe']> {
+  const r = look.recipe ?? {}, d = r.defaults ?? {};
+  const grain = look.name === 'Portra 400' && r.grain ? { ...r.grain, amount: 2 as const } : r.grain;
+  return { ...r, defaults: { ...d, sharpness: Math.min(d.sharpness ?? 0, -1), clarity: d.clarity ?? 1 }, ...(grain ? { grain } : {}) };
+}
 
 function fit(text: string): PresetResult | null {
   try { return engine.convertPreset('cube', text); } catch { return null; }
@@ -69,8 +87,8 @@ const films: Look[] = [];
 for (const [i, base] of LOOKS.entries()) {
   let look: Look, text: string, r: PresetResult | null, how: string;
   if (i === 0) {
-    look = printLook; text = readFileSync(printCube, 'utf8'); r = fit(text); how = 'datasheet print';
-    if (!r) throw new Error('Portra Print does not fit');
+    look = film1; text = readFileSync(film1Cube, 'utf8'); r = fit(text); how = 'datasheet print';
+    if (!r) throw new Error('Pro 400H does not fit');
   } else {
     const pushed: Look = { ...base, op: filmResponse(base.op) };
     text = cubeText(pushed); r = fit(text); look = pushed; how = 'film response';
@@ -79,6 +97,7 @@ for (const [i, base] of LOOKS.entries()) {
       look = base; text = cubeText(base); r = fit(text)!; how = 'as authored';
     }
   }
+  look = { ...look, recipe: v3Recipe(look) };
   films.push(look);
   writeFileSync(join(out, 'cube', `${String(i + 1).padStart(2, '0')}-${look.name.replaceAll(' ', '-')}.cube`), text);
   const icon = filmIcon(tile, look);
