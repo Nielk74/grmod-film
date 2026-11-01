@@ -15,7 +15,7 @@ const toLin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) *
 const toDisp = (v: number) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055);
 const smooth = (lo: number, hi: number, x: number) => { const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo))); return t * t * (3 - 2 * t); };
 
-function lab(c: RGB): RGB {
+export function lab(c: RGB): RGB {
   const r = toLin(c[0]), g = toLin(c[1]), b = toLin(c[2]);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
@@ -29,7 +29,7 @@ function linOf(L: number, a: number, b: number): RGB {
 }
 
 /** Lab -> display, shrinking chroma (same L and hue) until it fits instead of clipping channels. */
-function display(L: number, a: number, b: number): RGB {
+export function display(L: number, a: number, b: number): RGB {
   L = Math.min(1, Math.max(0, L));
   const inside = (k: number) => linOf(L, a * k, b * k).every(v => v >= -1e-4 && v <= 1 + 1e-4);
   let k = 1;
@@ -58,14 +58,16 @@ function pushColour(x: RGB, f: RGB, k: number): [number, number] {
   return [c * Math.cos(h), c * Math.sin(h)];
 }
 
-export function filmResponse(op: Op): Op {
+/** `colour`: how far the film's colour change is pushed (1: as the film; v3: 1.5); `midSaturation`: the
+ * interlayer saturation in the midtones (v3: 0.12). Lower values keep skin closer to Standard. */
+export function filmResponse(op: Op, colour = 1.5, midSaturation = 0.12): Op {
   return c => {
     const x = lab(c), f = lab(op(c));
     const mid = smooth(0.2, 0.45, x[0]) * (1 - smooth(0.75, 0.95, x[0]));
     let L = x[0] + (1 + 0.5 * mid) * (f[0] - x[0]);
     L += 0.18 * (L - 0.5) * mid;
-    const [a, b] = pushColour(x, f, 1.5);
-    const s = (1 + 0.12 * mid) * (1 - 0.2 * smooth(0.82, 1, L));
+    const [a, b] = pushColour(x, f, colour);
+    const s = (1 + midSaturation * mid) * (1 - 0.2 * smooth(0.82, 1, L));
     return display(L, a * s, b * s);
   };
 }

@@ -5,7 +5,8 @@
  * default ratios), with
  *  - every film pushed by "film response" (response.ts) instead of shipped as authored; a film whose
  *    pushed version the camera cannot hold (fit mean over 3 dE2000, or a post matrix beyond 12 bits)
- *    stays as authored;
+ *    stays as authored. Four films get a gentler colour push, because x1.5 turned faces orange under
+ *    warm light (COLOUR_PUSH);
  *  - film 1 (Velvia, which the user dropped) replaced by "Pro 400H": Fujifilm Pro 400H on Fujicolor
  *    Crystal Archive paper, from stock datasheet data through tools/jpeg_experiments/film_datasheet_v3.py
  *    (the data is spektrafilm's, CC BY-SA 4.0: this .cube is not part of the repository). An earlier
@@ -43,6 +44,12 @@ import { filmResponse } from './response';
 
 const PICTURE_NAMES = ['Star Trails', 'Film Strip', 'Contours', 'Aperture', 'Synthwave', 'Bauhaus', 'Great Wave', 'Good Night'];
 const MAX_FIT = 3.0;
+/** Films whose x1.5 colour push saturated skin past natural (Standard x1.35-1.67; orange faces under warm
+ * light; tools/jpeg_experiments/skin_safe_v3.ts, 2026-11-01): [colour push, midtone saturation].
+ * Gold 200 and Nostalgic Neg keep the film's own colour (bringing skin to ~x1.2 would take their sky
+ * back to Standard's blue); Astia and Kodachrome 64 keep skin within about x1.2 of Standard. A global
+ * push is the only lever: a cap on skin colours alone does not survive the camera fit. */
+const COLOUR_PUSH: Record<string, [number, number]> = { 'Gold 200': [1, 0], 'Nostalgic Neg': [1, 0], Astia: [1.2, 0.048], 'Kodachrome 64': [1.1, 0.024] };
 
 const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
 if (!official || !film1Cube || !pictureDir || !out) {
@@ -90,8 +97,9 @@ for (const [i, base] of LOOKS.entries()) {
     look = film1; text = readFileSync(film1Cube, 'utf8'); r = fit(text); how = 'datasheet print';
     if (!r) throw new Error('Pro 400H does not fit');
   } else {
-    const pushed: Look = { ...base, op: filmResponse(base.op) };
-    text = cubeText(pushed); r = fit(text); look = pushed; how = 'film response';
+    const push = COLOUR_PUSH[base.name];
+    const pushed: Look = { ...base, op: filmResponse(base.op, push?.[0], push?.[1]) };
+    text = cubeText(pushed); r = fit(text); look = pushed; how = push ? `film response, colour x${push[0]}` : 'film response';
     if (!r || r.meanDE2000! > MAX_FIT) {
       console.log(`film ${i + 1} ${base.name}: film response ${r ? `fits at ${r.meanDE2000!.toFixed(2)}` : 'does not fit'}; kept as authored`);
       look = base; text = cubeText(base); r = fit(text)!; how = 'as authored';
