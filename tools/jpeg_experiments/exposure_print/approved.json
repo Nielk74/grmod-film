@@ -1,0 +1,594 @@
+{
+  "experiment": "Gold 200 / Endura: negative +2 EV, fixed-filtration scalar print compensation",
+  "accepted_by": "Antoine",
+  "accepted_date": "2026-11-01",
+  "representation": "baseline/candidate are the unquantized GR III/IIIx matrix/RGB-curve software fit. target is the full candidate LUT.",
+  "baseline_identity": "The baseline is the controlled simplified spectral Gold 200 / Endura model at 0 EV. It is a different target from the authored Gold look in the existing film pack.",
+  "grid": {
+    "size": 33,
+    "f32_order": "[r,g,b,ch], b fastest, little endian, sRGB display 0..1"
+  },
+  "fit_options": {
+    "post": true,
+    "endGreyWeight": 24
+  },
+  "middle_gray_display": [
+    0.4662925656807994,
+    0.4663481457352127,
+    0.46634277824438036
+  ],
+  "controls": {
+    "negative_stock": "kodak_gold_200",
+    "print_stock": "kodak_portra_endura",
+    "scene_illuminant": "D55",
+    "print_illuminant": "CIE A",
+    "viewing_illuminant": "D50 adapted Bradford to D65/sRGB",
+    "interlayer_amount": 0.3,
+    "source_white_balance": "fixed in every source JPEG; no per-image rebalancing or statistics used",
+    "baseline_filter_calibration": "Print gains calibrated once to Lab[50,0,0] at the actual calibrated-inverse Standard middle gray; thereafter only the same scalar is added to all three print gains.",
+    "middle_gray_display": [
+      0.4662925656807994,
+      0.4663481457352127,
+      0.46634277824438036
+    ],
+    "middle_gray_scene": [
+      0.1029858451912722,
+      0.0990470051550614,
+      0.10158794516884677
+    ],
+    "negative_exposure_operation": "Film.exposure[:] = EV*log10(2), before negative characteristic curves",
+    "print_compensation_operation": "Film.print_gain = baseline_gain + a single common log10 scalar, root solved for same Lab L*=50; channel differences stay fixed",
+    "exploratory_variants": "Scratch-only bounded probes examined Portra400 and Gold200 at -1,+1,+2EV; Gold200 +2EV selected because its changes were clearer."
+  },
+  "selected_physical_parameters": [
+    {
+      "stock": "kodak_gold_200",
+      "negative_exposure_ev": 0.0,
+      "negative_exposure_log10_per_channel": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "baseline_print_gain_log10": [
+        -0.4575152311479678,
+        -0.44194305757134655,
+        -0.2868736404715806
+      ],
+      "print_time_compensation_log10": -2.4956194687568886e-13,
+      "print_time_compensation_ev": -8.290268427411382e-13,
+      "print_gain_log10": [
+        -0.4575152311482174,
+        -0.44194305757159613,
+        -0.28687364047183017
+      ],
+      "middle_gray_Lab": [
+        50.00000000003247,
+        -1.4432899320127035e-12,
+        -1.5099033134902129e-12
+      ],
+      "middle_gray_lightness_residual": 3.247180302423658e-11,
+      "ramp_input_display": [
+        0.0,
+        0.04,
+        0.1,
+        0.2,
+        0.35,
+        0.4663278298867975,
+        0.6,
+        0.75,
+        0.9,
+        1.0
+      ],
+      "ramp_output_Lab": [
+        [
+          4.949367796031339,
+          6.121714928426155,
+          -6.884827959005479
+        ],
+        [
+          5.740480902198875,
+          5.687659043322718,
+          -6.321495878839917
+        ],
+        [
+          9.152559009051277,
+          2.7965503230062136,
+          -4.257967448302474
+        ],
+        [
+          18.43382164272321,
+          -0.9567664585776736,
+          -1.2129121669462117
+        ],
+        [
+          35.81561253829865,
+          -2.2402922816822377,
+          -0.9141357225971314
+        ],
+        [
+          50.00027601599399,
+          0.007842991901263474,
+          0.002127612566504844
+        ],
+        [
+          67.28516081496966,
+          -0.9193970267917795,
+          2.12367059359051
+        ],
+        [
+          81.36354019957774,
+          -1.2524447983323084,
+          2.9058322836538863
+        ],
+        [
+          92.05051878543821,
+          -0.8469579548362471,
+          2.3675099275895617
+        ],
+        [
+          99.65798875174575,
+          -0.08783659991284942,
+          0.4901812301932207
+        ]
+      ],
+      "versus_baseline_random4096_deltaE00": {
+        "mean": 2.0879461212313083e-11,
+        "p95": 2.9065883602914185e-11
+      },
+      "filtration_pairwise_differences_max_residual": 0.0
+    },
+    {
+      "stock": "kodak_gold_200",
+      "negative_exposure_ev": 2.0,
+      "negative_exposure_log10_per_channel": [
+        0.6020599913279624,
+        0.6020599913279624,
+        0.6020599913279624
+      ],
+      "baseline_print_gain_log10": [
+        -0.4575152311479678,
+        -0.44194305757134655,
+        -0.2868736404715806
+      ],
+      "print_time_compensation_log10": 0.34369594431369754,
+      "print_time_compensation_ev": 1.1417332135145142,
+      "print_gain_log10": [
+        -0.11381928683427028,
+        -0.09824711325764901,
+        0.05682230384211695
+      ],
+      "middle_gray_Lab": [
+        50.0,
+        1.1489611849208603,
+        4.341512028154515
+      ],
+      "middle_gray_lightness_residual": 0.0,
+      "ramp_input_display": [
+        0.0,
+        0.04,
+        0.1,
+        0.2,
+        0.35,
+        0.4663278298867975,
+        0.6,
+        0.75,
+        0.9,
+        1.0
+      ],
+      "ramp_output_Lab": [
+        [
+          4.090297469755633,
+          6.693123515693261,
+          -7.62093462219362
+        ],
+        [
+          5.520533857963564,
+          5.9912000241453685,
+          -6.474243305347876
+        ],
+        [
+          9.695491258382948,
+          3.5528069440342174,
+          -3.9924411888106635
+        ],
+        [
+          18.51022128647059,
+          1.4780406784971611,
+          -0.5980562808236223
+        ],
+        [
+          35.59186545007569,
+          0.050569184713328275,
+          1.9520326604560934
+        ],
+        [
+          50.000258950094874,
+          1.1573103072047841,
+          4.343600112105994
+        ],
+        [
+          67.15069448930751,
+          -0.5035715968471077,
+          6.775606636872067
+        ],
+        [
+          79.04147766534092,
+          -0.585806500294217,
+          7.599718375883913
+        ],
+        [
+          87.33452333723501,
+          -0.5153301543014965,
+          6.044551985497604
+        ],
+        [
+          95.31969386974868,
+          -0.33888788901986766,
+          4.490548983180909
+        ]
+      ],
+      "versus_baseline_random4096_deltaE00": {
+        "mean": 2.7374936639914793,
+        "p95": 4.9820812983081035
+      },
+      "filtration_pairwise_differences_max_residual": 0.0
+    }
+  ],
+  "targets": {
+    "baseline": {
+      "file": "targets/baseline-target.cube",
+      "sha256": "dbe1556bc1f3ab14d01707d5ad23fe6321805dc914617b240d9cdeb0dab73ec5"
+    },
+    "candidate": {
+      "file": "targets/candidate-target.cube",
+      "sha256": "e3c3f04c1e82a4856783cfc0390c8e58b93a1c13400ca8395951cbf2ceec5cb6"
+    }
+  },
+  "preview_hashes": {
+    "baseline.f32": "ad5552fc647952f61e10ae8cedd3fddc3c6677455c1192f6c640aae7e0a62fc0",
+    "candidate.f32": "c86865ce62eaf6595e3887834a68aa57a3a88acfe70ef221ef510e674e74ec80",
+    "target.f32": "a5bfe623ec059a345abb65f0e5a22dbf70478f8434ad5e3a8435742e5617686b"
+  },
+  "fits": [
+    {
+      "id": "baseline",
+      "method": "convertGr3xCube",
+      "options": {
+        "post": true,
+        "endGreyWeight": 24,
+        "refine": false
+      },
+      "grid_kind": "unquantized GR3X_CAMERA.slotApply software model",
+      "independent_synthetic1100": {
+        "meanDE2000": 1.8560785374499853,
+        "p95DE2000": 5.228337852332054
+      },
+      "heldout_photo18000": {
+        "meanDE2000": 1.0189995803901604,
+        "p95DE2000": 2.16517221059091,
+        "maxDE2000": 5.880861765024352
+      },
+      "heldout_photos": [
+        {
+          "meanDE2000": 1.2463045881154058,
+          "p95DE2000": 2.423411026497147,
+          "maxDE2000": 5.880861765024352
+        },
+        {
+          "meanDE2000": 1.0113784900843512,
+          "p95DE2000": 1.7982943356427015,
+          "maxDE2000": 5.2182259211517295
+        },
+        {
+          "meanDE2000": 0.7993156629707981,
+          "p95DE2000": 2.1884576799811235,
+          "maxDE2000": 2.838055382876666
+        }
+      ],
+      "full_grid": {
+        "meanDE2000": 5.41543717831742,
+        "p95DE2000": 18.555068275685333,
+        "maxDE2000": 33.67469784151436
+      },
+      "fitted_middlegray_Lab": [
+        49.226302964772415,
+        0.013274978610811061,
+        0.5870401822496873
+      ],
+      "target_middlegray_Lab": [
+        50.01943932376187,
+        -0.09725295908802334,
+        0.017063471923517426
+      ],
+      "params": {
+        "M1": [
+          [
+            1.0412486193523585,
+            -0.11081308600815752,
+            0.06956446665579911
+          ],
+          [
+            0.06704515794624763,
+            0.7617482055673243,
+            0.17120663648642814
+          ],
+          [
+            0.12489555334468977,
+            0.10945309985500942,
+            0.7656513468003008
+          ]
+        ],
+        "ck": [
+          [
+            0.08777429485849716,
+            0.09773722786283894,
+            0.11797763075460202,
+            0.15360827405813188,
+            0.20540715184722827,
+            0.2734597769660229,
+            0.337756074095823,
+            0.42067544765310794,
+            0.5051045549652651,
+            0.591814632595627,
+            0.6654744722016128,
+            0.7405580355086947,
+            0.7880045999350574,
+            0.8407774833824336,
+            0.8938516599920273,
+            0.9104558224328813,
+            1
+          ],
+          [
+            0.04183897790335922,
+            0.07071778603935927,
+            0.11127123435848126,
+            0.16266587720292122,
+            0.22222783173452132,
+            0.28693379223313537,
+            0.3542027511457795,
+            0.4196843553759828,
+            0.503082777435067,
+            0.5878058460376473,
+            0.6651860794028808,
+            0.7336514972331318,
+            0.7977178916380365,
+            0.8474881581742767,
+            0.9018155308513987,
+            0.9060778745944265,
+            0.9980731778363728
+          ],
+          [
+            0.09461498425653146,
+            0.10619956238443039,
+            0.1298181406656527,
+            0.16773442216574214,
+            0.22263365995595233,
+            0.2815236321312171,
+            0.3506219078452441,
+            0.41859633031195487,
+            0.49772360134619076,
+            0.5720878522570594,
+            0.6515921435873097,
+            0.7119246042661052,
+            0.7768678617841479,
+            0.828896188004588,
+            0.8835134896432005,
+            0.8871482894620183,
+            0.9903529273719444
+          ]
+        ],
+        "P2": [
+          [
+            1.1755493564211414,
+            0.08057543846324437,
+            -0.2561247948843859
+          ],
+          [
+            0.167343163715168,
+            0.8698477596482017,
+            -0.03719092336336968
+          ],
+          [
+            0.03838126093373289,
+            -0.14174720116171008,
+            1.1033659402279772
+          ]
+        ]
+      },
+      "warnings": [
+        "IIIx: sRGB display LUT only. Matrix/RGB-curve approximation; preview is a software reference, not measured camera color.",
+        "Keep a full-frame RAW. In-camera RAW development falls back to the original base Image Control.",
+        "Large color differences in parts of this LUT; compare the preview before exporting."
+      ],
+      "photographic_evaluation_note": "18,000 deterministic samples from three private Standard previews; independent of fitting, also inspected during research selection. Source photographs are external."
+    },
+    {
+      "id": "candidate",
+      "method": "convertGr3xCube",
+      "options": {
+        "post": true,
+        "endGreyWeight": 24,
+        "refine": false
+      },
+      "grid_kind": "unquantized GR3X_CAMERA.slotApply software model",
+      "independent_synthetic1100": {
+        "meanDE2000": 1.3980457097609926,
+        "p95DE2000": 3.4504518461800417
+      },
+      "heldout_photo18000": {
+        "meanDE2000": 0.9418639294458747,
+        "p95DE2000": 2.1468857484074717,
+        "maxDE2000": 4.7615435173806615
+      },
+      "heldout_photos": [
+        {
+          "meanDE2000": 1.0836728295879916,
+          "p95DE2000": 2.0684860215598797,
+          "maxDE2000": 4.7615435173806615
+        },
+        {
+          "meanDE2000": 0.9040478059455924,
+          "p95DE2000": 2.551991652512118,
+          "maxDE2000": 4.15642721142692
+        },
+        {
+          "meanDE2000": 0.8378711528040693,
+          "p95DE2000": 2.1343291704119243,
+          "maxDE2000": 3.23880584368236
+        }
+      ],
+      "full_grid": {
+        "meanDE2000": 4.319149702954891,
+        "p95DE2000": 19.684642381365606,
+        "maxDE2000": 42.19775465015862
+      },
+      "fitted_middlegray_Lab": [
+        49.57777495567278,
+        1.5934904071799871,
+        4.065982350802155
+      ],
+      "target_middlegray_Lab": [
+        50.01218628972873,
+        1.0823734041355282,
+        4.343739733145902
+      ],
+      "params": {
+        "M1": [
+          [
+            1.0609664581572797,
+            -0.1236873931405216,
+            0.06272093498324176
+          ],
+          [
+            0.0560144493881397,
+            0.8473464964015793,
+            0.0966390542102809
+          ],
+          [
+            0.13797423545573362,
+            -0.07980902853238755,
+            0.941834793076654
+          ]
+        ],
+        "ck": [
+          [
+            0.0896157357467401,
+            0.10186681865578108,
+            0.1275010833350745,
+            0.16835926269378026,
+            0.21606341947486327,
+            0.28608917156902997,
+            0.35737156811339066,
+            0.436805031935872,
+            0.5278015788515321,
+            0.6126637381905242,
+            0.6741237730846269,
+            0.7359538986702452,
+            0.7759715577678598,
+            0.8167140072018888,
+            0.85035003278829,
+            0.8877568210279086,
+            0.899241661868901
+          ],
+          [
+            0.025493786603441204,
+            0.06589139404379141,
+            0.10845788327856759,
+            0.15528898175161074,
+            0.2128458084539915,
+            0.27531961650663567,
+            0.3476096931185396,
+            0.4146862516636111,
+            0.5046143346561357,
+            0.5944529255640608,
+            0.6669200469353677,
+            0.7199554988191725,
+            0.773146224334547,
+            0.8134273426538644,
+            0.8492566988244435,
+            0.8809501064267611,
+            0.9055369615373172
+          ],
+          [
+            0.11440001574401118,
+            0.11617403260174636,
+            0.13682385536862623,
+            0.1672921304560454,
+            0.21089427222481755,
+            0.2682959517868168,
+            0.3305544865061938,
+            0.40043904711415673,
+            0.46907789026519764,
+            0.5439393474841399,
+            0.6103610278042597,
+            0.6614225407136135,
+            0.7062177421416,
+            0.7542530416281723,
+            0.7919774829224516,
+            0.8337094204511402,
+            0.8413941773594036
+          ]
+        ],
+        "P2": [
+          [
+            1.0845477569965989,
+            0.09357736525447909,
+            -0.1781251222510779
+          ],
+          [
+            0.13747820587674173,
+            0.7984581039948029,
+            0.06406369012845536
+          ],
+          [
+            0.01201115567272517,
+            0.12165093430130737,
+            0.8663379100259675
+          ]
+        ]
+      },
+      "warnings": [
+        "IIIx: sRGB display LUT only. Matrix/RGB-curve approximation; preview is a software reference, not measured camera color.",
+        "Keep a full-frame RAW. In-camera RAW development falls back to the original base Image Control.",
+        "Large color differences in parts of this LUT; compare the preview before exporting."
+      ],
+      "photographic_evaluation_note": "18,000 deterministic samples from three private Standard previews; independent of fitting, also inspected during research selection. Source photographs are external."
+    }
+  ],
+  "limitations": [
+    "A hypothesis from a simplified spectral negative-to-print model; not a measured reproduction of real Gold200 at box speed versus two stops extra exposure.",
+    "Upstream profile data include processed manufacturer curves and modeled dye behavior; this local pipeline omits masking-coupler chemistry, grain, halation and spatial effects, and uses a linear-sRGB spectral basis.",
+    "The starting camera Standard JPEG has already rendered tone, white balance and clipping. Its fitted inverse estimates scene RGB; missing highlight or shadow information cannot be recovered.",
+    "Stock curves, modeled interlayer amount, print paper, baseline filtration and D55 scene illuminant are held fixed. This does not simulate push/pull development or a scanner auto-balance.",
+    "Scalar print-gain compensation is an optical-model exposure control; chromatic filtration is mathematically fixed but is not a physical enlarger spectral-filter implementation.",
+    "Baseline and candidate previews use unquantized GR3X_CAMERA SlotParams. No firmware was installed, built, written or optically measured; actual-camera transfer remains unverified.",
+    "The 33^3 exported targets and preview grids are trilinearly interpolated; finite-grid interpolation slightly changes the exact continuous middle-gray result.",
+    "The fit cannot reproduce every 3D spectral response. Each error is measured against its own different target: independent synthetic p95 is 5.228 baseline and 3.450 candidate, while full 33^3 cube p95 is 18.5551 baseline and 19.6846 candidate; maxima are 33.6747 and 42.1978 ΔE00. Saturated and extreme RGB regions can depart severely from the target despite modest common-photo errors.",
+    "The photographic fit-error decrease 1.019 to 0.942 ΔE00 is a representability comparison between different targets. It does not measure aesthetic quality or establish a preference for the +2 EV result."
+  ],
+  "attribution": {
+    "author": "Andrea Volpato",
+    "project": "spektrafilm",
+    "url": "https://github.com/andreavolpato/spektrafilm",
+    "pinned_commit": "3bb2c2d2801ff68b92019cf1dbcbb133d60832bc",
+    "profiles_license": "CC BY-SA 4.0",
+    "derived_grids_and_cubes_license": "CC BY-SA 4.0",
+    "modifications": "Derived by Codex for Antoine on 2026-11-01 using the existing GRMod simplified spectral model; fixed-filtration exposure/print-compensation experiment and matrix/curve approximation. Upstream profiles unmodified; no upstream implementation code imported.",
+    "sources": [
+      {
+        "title": "Pinned profile data",
+        "url": "https://github.com/andreavolpato/spektrafilm/tree/3bb2c2d2801ff68b92019cf1dbcbb133d60832bc/src/spektrafilm/data/profiles"
+      },
+      {
+        "title": "License for profiles, LUTs and direct derivatives",
+        "url": "https://github.com/andreavolpato/spektrafilm/blob/3bb2c2d2801ff68b92019cf1dbcbb133d60832bc/SPEKTRAFILM_LICENSE.txt"
+      }
+    ]
+  },
+  "generation_inputs": {
+    "profiles/kodak_gold_200.json": "aa8a0c1c7851fface3752f968cdf6c6d74a26fc9756a4460d3155d2382506b7c",
+    "profiles/kodak_portra_endura.json": "e3bb6069e02d088d8080d38ce28035816038f62786e2aff9176bf4aeeb4820a0",
+    "calibration.json": "0bf6465dc8eb7acd95ad7884e4bcc1ee58496986d313da6bcc87808a105954bc",
+    "../film_datasheet_v3.py": "0531963496821faa2485b8bb7ab994ab6649db2791bf030b5346e03f026b0f65"
+  }
+}

@@ -1,0 +1,5 @@
+2026-11-01 — Research derivative by Codex for Antoine.
+Derived from spektrafilm profile data by Andrea Volpato, CC BY-SA 4.0.
+https://github.com/andreavolpato/spektrafilm
+Upstream profiles unmodified. Existing GR Mod simplified spectral model used to generate Gold 200 / Endura 0 EV and +2 EV targets, with fixed chromatic filtration and common scalar print compensation to the same middle-gray L*. Targets then fitted to the existing GR III/IIIx software matrix/RGB-curve model. No upstream implementation code copied. See manifest.json for data hashes, model limits and exact parameters.
+Derived .cube/.f32 assets remain CC BY-SA 4.0; the original license is supplied unchanged.
