@@ -165,6 +165,26 @@ describe.skipIf(!firmware)('film recipes in a GR III 2.10 build', () => {
     await expect(engine.buildFirmware(requests.slice(0, 1).map(({ grain: _g, ...r }) => ({ ...r, slot: 'CY' as const })), ratios, [], { grainRow: true })).rejects.toThrow(/film count/);
   }, 600000);
 
+  it('the film MTF: put into the JPEG stage, verified, read back; a build without it differs; it needs a film count', async () => {
+    const engine = await open();
+    const requests = LOOKS.slice(0, 3).map((l, i) => {
+      const r = engine.convertPreset('cube', cubeText(l, 17));
+      return { slot: GR3X_FILM_IDS[i], preset: { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) }, ...(i === 1 ? { filmMtf: true } : {}) };
+    });
+    const options = { filmCount: 4, adjSoftFocus: true, dateStamp: true, tealHue: true, grainRow: true };
+    const build = await engine.buildFirmware(requests, ratios, [], options);
+    expect(Object.values(build.checks).every(v => v === true)).toBe(true);
+    const summary = await (await open()).inspect(build.file);
+    expect(summary.verified).toBe(true);
+    expect(summary.slots.map(s => s.filmMtf === true)).toEqual([false, true, false, false]);
+    const plain = await engine.buildFirmware(requests.map(({ filmMtf: _f, ...r }) => r), ratios, [], options);
+    expect(plain.sha256).not.toBe(build.sha256);
+    const s2 = await (await open()).inspect(plain.file);
+    expect(s2.verified).toBe(true);
+    expect(s2.slots.every(s => s.filmMtf === undefined)).toBe(true);
+    await expect(engine.buildFirmware([{ slot: 'CY', filmMtf: true }], ratios, [], {})).rejects.toThrow();
+  }, 600000);
+
   it('recipes need a film count (round 10), and only GR III / IIIx films have them', async () => {
     const engine = await open();
     await expect(engine.buildFirmware([{ slot: 'CY', defaults: { sharpness: 1 } }], ratios, [], {})).rejects.toThrow();

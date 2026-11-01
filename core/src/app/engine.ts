@@ -173,6 +173,8 @@ export interface SlotRequest {
   defaults?: Gr3xFilmDefaults;
   /** GR III 2.10 / IIIx 1.60 with a film count (round 10): the film's grain, fixed in the build. */
   grain?: Grain;
+  /** Round 10: the film's own sharpness, made in the JPEG step (tools/filmmtf/filmmtf.c, core/src/color/filmmtf.ts). */
+  filmMtf?: boolean;
 }
 
 /** Soft focus on one negative clarity setting: its row of the clarity table gets the gains of `strength`. */
@@ -228,6 +230,7 @@ export interface FirmwareSummary {
     /** GR III films: the recipe's camera defaults and grain, when the file has them. */
     defaults?: Gr3xFilmDefaults;
     grain?: Grain;
+    filmMtf?: boolean;
   }[];
   /** Aspect ratios this file adds to the camera (empty when none, or when they cannot be read). */
   ratios: BuiltRatio[];
@@ -584,6 +587,7 @@ export class Engine {
           iconChanged: !!looks!.films?.[i]?.icon,
           ...(looks!.films?.[i]?.defaults ? { defaults: looks!.films![i].defaults } : {}),
           ...(looks!.films?.[i]?.grain ? { grain: looks!.films![i].grain } : {}),
+          ...(looks!.films?.[i]?.filmMtf ? { filmMtf: true } : {}),
         })) : [], ratios: matched ? candidate!.ratios : [], softFocus: matched ? softFocus : [],
         adjSoftFocus: matched && adjSoftFocus, dateStamp: matched && dateImprint, monoUnlock: matched && looks?.monoReplicas === true, extraSlots: [],
         ...(matched && pictures.length ? { shutdownPictures: pictures.map((p, k) => ({ id: p.id ?? k + 1, name: p.name, jpeg: p.jpeg })) } : {}),
@@ -945,7 +949,7 @@ export class Engine {
           const own = Object.fromEntries(given.filter(([, v]) => v !== name));
           if ((r?.defaults || r?.grain) && filmCount === undefined) throw new FirmwareError('bad-edit', 'film recipes need a film count');
           return { name, ...(Object.keys(own).length ? { names: own } : {}), ...(r?.preset ? { preset: r.preset } : {}), ...(r?.icon ? { icon: r.icon } : {}),
-            ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain && r.grain.amount ? { grain: r.grain } : {}),
+            ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain && r.grain.amount ? { grain: r.grain } : {}), ...(r?.filmMtf ? { filmMtf: true } : {}),
             // Round 6: Halation is set in the camera (each film has the line).
             ...(typeof r?.halation === 'number' && r.halation > 0 && filmCount === undefined ? { halation: r.halation as 1 | 2 } : {}) };
         }),

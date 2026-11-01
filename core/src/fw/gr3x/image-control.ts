@@ -65,6 +65,8 @@ export interface Gr3xFilmLook {
   defaults?: Gr3xFilmDefaults;
   /** Round 10: the film's grain, fixed in the build (tools/grain/grain.c). */
   grain?: Grain;
+  /** Round 10: the film's own sharpness (its dye layers' MTF), made in the JPEG step before halation and grain (tools/filmmtf/filmmtf.c). */
+  filmMtf?: boolean;
 }
 export interface Gr3xLookOptions {
   /** 1/2 reproduce T5/T5-L1; 3 provides nine independent T6 film slots. */
@@ -222,7 +224,8 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   // GR Mod's film recipes: camera defaults and grain need round 10's films (looks of their own).
   for (const f of options.films ?? []) { validateGr3xFilmDefaults(f.defaults); validateGr3xGrain(f.grain); }
   const recipes = (options.films ?? []).some(f => gr3xHasDefaults(f.defaults)), grains = (options.films ?? []).some(f => grainSetting(f.grain) !== 0);
-  if ((recipes || grains || options.tealHue) && !round10) throw new FirmwareError('bad-edit', 'IIIx film recipes (camera defaults, grain, teal sky) need a round 10 build');
+  const filmMtf = (options.films ?? []).some(f => f.filmMtf === true);
+  if ((recipes || grains || filmMtf || options.tealHue) && !round10) throw new FirmwareError('bad-edit', 'IIIx film recipes (camera defaults, grain, teal sky) need a round 10 build');
   const tealHue = options.tealHue === true;
   const grainRow = options.grainRow === true;
   if (grainRow && !round10) throw new FirmwareError('bad-edit', 'IIIx Grain row needs a round 10 build');
@@ -601,6 +604,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     // The Grain row: the amount comes from the camera (the stash), the size from the recipe.
     ...(grainRow ? { grain: { settings: films.map(f => f.grain?.size === 'large' ? 4 : 0), camera: true } }
       : grains ? { grain: { settings: films.map(f => grainSetting(f.grain)) } } : {}),
+    ...(filmMtf ? { filmMtf: { films: films.map(f => f.filmMtf === true) } } : {}),
   });
   // Round 10: the film's record comes from the descriptor's own table (films-r10.ts).
   const descriptor = round10 ? undefined : code(`push {r1-r3,ip};ldrb r2,[r7,#0x77c];` +

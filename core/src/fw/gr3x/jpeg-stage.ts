@@ -37,6 +37,8 @@ import { halationLutR6, halationModuleR6, paramBytesR6 } from './halation-r6';
 import type { HalationLightR6 } from './halation-r6';
 import { GR3X_DATESTAMP_DIAG_R6_CODE, GR3X_HALATION_STATUS_R6_CODE } from './picture-modules-r6';
 import { GRAIN_CODE } from './grain-code';
+import { FILM_MTF_CODE } from './filmmtf-code';
+import { filmMtfMatrices } from '../../color/filmmtf';
 import { GRAIN_GAIN, GRAIN_MAGIC, grainTone } from '../../color/grain';
 import { GRAIN_COLOUR_TILES, GRAIN_LUMA_TILES } from '../../color/grain-tables';
 
@@ -66,6 +68,7 @@ const GUARDS: readonly (readonly [number, number])[] = [
 ];
 const HALATION_MAGIC = 0x324c4148; // 'HAL2', as GR IV 0.8.0
 const HALATION_MAGIC_R7 = 0x344c4148; // 'HAL4', as GR IV 0.8.2
+const FILM_MTF_MAGIC = 0x3146544d; // 'MTF1'
 const LUT_N = 4096;
 /** Round 7: film k's entry in the module's look map (looks 64.. as 32..: its map has 64 entries). */
 export const GR3X_HALATION_FILM_STYLE = 32;
@@ -98,6 +101,9 @@ export interface Gr3xJpegOptions {
   /** The date imprint's stub, already at Execute's entry: the chain ends there instead (halation
    * first, then the date, as on GR IV). */
   after?: number;
+  /** Round 10, GR Mod's film recipes: the films whose sharpness is the film's own (their dye layers' MTF), made by tools/filmmtf/filmmtf.c
+   * before the halation and the grain (so the grain is not softened by it): a flag per film. */
+  filmMtf?: { films: readonly boolean[] };
 }
 
 const u32le = (words: readonly number[]) => wordsToBytes(words.map(w => w >>> 0));
@@ -105,7 +111,9 @@ const u16le = (v: readonly number[]) => { const b = new Uint8Array(v.length * 2)
 const addr = (r: string, a: number) => `movw ${r},#${a & 65535};movt ${r},#${a >>> 16};`;
 
 export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
-  if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain) return undefined;
+  if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain && !o.filmMtf) return undefined;
+  if (o.filmMtf && (!o.halation7 || o.filmMtf.films.length !== o.halation7.light.length || o.diagnostics))
+    throw new FirmwareError('bad-edit', 'IIIx film MTF: round 10 films, a flag per film');
   if (o.grain && (!o.halation7 || o.grain.settings.length !== o.halation7.light.length || o.grain.settings.some(v => !Number.isInteger(v) || v < 0 || v > 7 || (o.grain!.camera === true && (v & 3) !== 0))))
     throw new FirmwareError('bad-edit', 'IIIx grain: round 10 films, a setting per film');
   if (o.halation && o.halation7) throw new FirmwareError('internal', 'IIIx halation: one form');
@@ -206,8 +214,21 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     entries7 = { halation: stub, halationModule: module, halationContext: ctx, halationLut: lut, halationLooks: entries, ...(goldCtx ? { halationGoldContext: goldCtx, halationGoldLut: goldLut, halationOrangeContext: orangeCtx } : {}) };
     tail = `b #${stub};`; first = stub;
   }
+  if (o.filmMtf) {
+    // First in the chain: the film's sharpness acts on the picture before the halation's glow and the grain. The context: the cache
+    // functions, the allocator, the stash, the magic, the four matrices (Q12) and the look map (film k is look 32 + k).
+    const map = new Uint8Array(64);
+    o.filmMtf.films.forEach((on, k) => { if (on) map[GR3X_HALATION_FILM_STYLE + k] = 1; });
+    const mix = new Uint8Array(72), mv = new DataView(mix.buffer);
+    filmMtfMatrices().forEach((v, i) => mv.setInt16(i * 2, v, true));
+    const ctx = p.append(new Uint8Array([...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, FILM_MTF_MAGIC]), ...mix, ...map]));
+    const module = p.append(Uint8Array.from(atob(FILM_MTF_CODE), c => c.charCodeAt(0)));
+    const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}bl #${module};pop {r0-r3,ip,lr};${tail}`);
+    entries.filmMtf = stub; entries.filmMtfModule = module; entries.filmMtfContext = ctx;
+    tail = `b #${stub};`; first = stub;
+  }
   Object.assign(entries, entries7);
-  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), o.grain ? 'JPEG encode step: halation, grain, then the date imprint' : 'JPEG encode step: halation, then the date imprint');
+  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), o.filmMtf ? 'JPEG encode step: film MTF, halation, grain, then the date imprint' : o.grain ? 'JPEG encode step: halation, grain, then the date imprint' : 'JPEG encode step: halation, then the date imprint');
   else p.patch(GR3X_JPEG_EXECUTE, 0xe1a0c00d, branchWord(GR3X_JPEG_EXECUTE, first), 'JPEG encode step: GR Mod picture modules');
   return entries;
 }

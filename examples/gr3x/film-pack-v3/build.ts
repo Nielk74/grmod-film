@@ -24,7 +24,11 @@
  *    suggests);
  *  - film sharpness (MTF) through the camera's own controls: Sharpness at most -1 (less of the camera's
  *    sharpening), Clarity +1 where a film does not set it (development's edge effects). The controls'
- *    exact response is not checked on a camera.
+ *    exact response is not checked on a camera;
+ *  - Portra 400's own sharpness (FILM_MTF): Kodak's MTF curves per dye layer, made in the JPEG step (core/src/color/filmmtf.ts,
+ *    tools/filmmtf/filmmtf.c): a boost of 8..33 pixel structures and a softer fine detail, softest in the red layer. It replaces the
+ *    camera's Sharpness and Clarity for that film (both start at 0) and runs before the halation and the grain. About 3 times the
+ *    grain's work per picture; not checked on a camera.
  * Not in the firmware: shoot films with Highlight Correction (D-Range) on in contrasty light; it is the
  * camera's own film latitude (one stop less exposure, pushed back in the JPEG) and a camera-wide setting.
  *
@@ -58,6 +62,8 @@ const COLOUR_PUSH: Record<string, [number, number]> = { 'Gold 200': [1, 0], 'Nos
 const END_GREY_WEIGHT = 24;
 /** The user's focus films get a highlight shoulder (OkLab L that white drops by; story chapter 35). */
 const SHOULDER: Record<string, number> = { 'Portra 400': 0.03, 'CineStill 800T': 0.03, 'Gold 200': 0.03 };
+/** The films with their own sharpness, made in the JPEG step from the film's MTF (core/src/color/filmmtf.ts). Their Sharpness and Clarity start at 0. */
+const FILM_MTF = new Set(['Portra 400']);
 
 const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
 if (!official || !film1Cube || !pictureDir || !out) {
@@ -87,6 +93,7 @@ const film1: Look = { ...proNegHi, name: 'Pro 400H', caption: 'PRO 400H', code: 
 function v3Recipe(look: Look): NonNullable<Look['recipe']> {
   const r = look.recipe ?? {}, d = r.defaults ?? {};
   const grain = look.name === 'Portra 400' && r.grain ? { ...r.grain, amount: 2 as const } : r.grain;
+  if (FILM_MTF.has(look.name)) return { ...r, defaults: { ...d, sharpness: 0, clarity: 0 }, ...(grain ? { grain } : {}) };
   return { ...r, defaults: { ...d, sharpness: Math.min(d.sharpness ?? 0, -1), clarity: d.clarity ?? 1 }, ...(grain ? { grain } : {}) };
 }
 
@@ -119,7 +126,7 @@ for (const [i, base] of LOOKS.entries()) {
   const icon = filmIcon(tile, look);
   requests.push({ slot: GR3X_FILM_IDS[i], names: { en: look.name }, icon,
     preset: { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) },
-    ...(look.recipe?.defaults ? { defaults: look.recipe.defaults } : {}), ...(look.recipe?.grain ? { grain: look.recipe.grain } : {}) });
+    ...(look.recipe?.defaults ? { defaults: look.recipe.defaults } : {}), ...(look.recipe?.grain ? { grain: look.recipe.grain } : {}), ...(FILM_MTF.has(look.name) ? { filmMtf: true } : {}) });
   report.push({ film: i + 1, name: look.name, version: how, about: look.about, ...(look.recipe ? { recipe: look.recipe } : {}),
     meanDE2000: +r.meanDE2000!.toFixed(2), p95DE2000: +r.p95DE2000!.toFixed(2), postMatrix: !!r.postQ9 });
   for (let y = 0; y < 40; y++) for (let x = 0; x < 40; x++) {
@@ -143,7 +150,7 @@ const build = await engine.buildFirmware(requests, ratios, [], { filmCount: LOOK
 const checks = Object.entries(build.checks);
 if (!checks.every(([, v]) => v === true)) throw new Error('self-check failed: ' + JSON.stringify(build.checks));
 const summary = await (await Engine.open(raw)).inspect(build.file);
-if (!summary.verified || summary.slots.length !== LOOKS.length || summary.slots.some((s, i) => s.names.en !== films[i].name) || summary.shutdownPictures?.length !== PICTURE_NAMES.length || !summary.tealHue || !summary.grainRow)
+if (!summary.verified || summary.slots.length !== LOOKS.length || summary.slots.some((s, i) => s.names.en !== films[i].name || (s.filmMtf === true) !== FILM_MTF.has(films[i].name)) || summary.shutdownPictures?.length !== PICTURE_NAMES.length || !summary.tealHue || !summary.grainRow)
   throw new Error('a fresh engine does not rebuild the same file');
 
 // The reshaped halation must be in the file: its parameter block and its gains.
