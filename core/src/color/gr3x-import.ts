@@ -139,6 +139,13 @@ function solve(A: Float64Array[], b: Float64Array): Float64Array {
   return x;
 }
 
+/** `copies` of a 41-step grey ramp over each end of the range (0-0.2 and 0.75-1), for `endGreyWeight`. */
+export function endGreySamples(copies: number): Float64Array {
+  const out: number[] = [];
+  for (let c = 0; c < copies; c++) for (const [from, to] of [[0, 0.2], [0.75, 1]]) for (let i = 0; i <= 40; i++) { const v = from + ((to - from) * i) / 40; out.push(v, v, v); }
+  return Float64Array.from(out);
+}
+
 /** Fit display-referred sRGB CUBE data to IIIx's actual matrix/curve format.
  * The reference curve comes from IIIx native code; no GR IV calibration is used.
  * Independent validation samples estimate approximation error, not camera accuracy.
@@ -150,8 +157,9 @@ export function convertGr3xCube(text: string, options: ConvertOptions & { legacy
   // corners and skin tones; with `refine`, the guarded CIEDE2000 refinement on the IIIx model.
   // `legacyFit`: the colours up to GR Mod 0.8.2 only (to rebuild the camera-tested round 7 files).
   const base = syntheticSamples(2200, 160, 4), extra = options.legacyFit ? new Float64Array(0) : extraFitSamples();
-  const P = new Float64Array(base.length + extra.length);
-  P.set(base, 0); P.set(extra, base.length);
+  const ends = options.legacyFit ? new Float64Array(0) : endGreySamples(options.endGreyWeight ?? 0);
+  const P = new Float64Array(base.length + extra.length + ends.length);
+  P.set(base, 0); P.set(extra, base.length); P.set(ends, base.length + extra.length);
   options.onProgress?.(0.05);
   const target = applyCube(cube, P);
   // Black-and-white and toned black-and-white looks: equal rows, a curve per channel (see above).

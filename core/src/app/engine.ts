@@ -860,11 +860,11 @@ export class Engine {
    * Without it the result is what GR Mod 0.6.1 and earlier made. `refine` (.cube only, default
    * off) adds the guarded CIEDE2000 refinement. GR III / IIIx take .xmp and .cube too.
    */
-  convertPreset(kind: 'xmp' | 'cube', text: string, onProgress?: (f: number) => void, options: { post?: boolean; refine?: boolean; hue?: boolean; legacyFit?: boolean } = {}): PresetResult {
+  convertPreset(kind: 'xmp' | 'cube', text: string, onProgress?: (f: number) => void, options: { post?: boolean; refine?: boolean; hue?: boolean; legacyFit?: boolean; endGreyWeight?: number } = {}): PresetResult {
     if (this.info.family === 'gr3x') {
       // The second (post-curve) matrix, as on GR IV: GR III's matrix module has the stage (films only).
       const post = options.post !== false;
-      const c = kind === 'xmp' ? convertGr3xXmp(text, { onProgress, post }) : convertGr3xCube(text, { onProgress, post, refine: options.refine === true, legacyFit: options.legacyFit === true });
+      const c = kind === 'xmp' ? convertGr3xXmp(text, { onProgress, post }) : convertGr3xCube(text, { onProgress, post, refine: options.refine === true, legacyFit: options.legacyFit === true, endGreyWeight: options.endGreyWeight });
       const q = quantizeSlot(c.params, this.mStdQ13);
       // A (toned) black-and-white fit has equal rows; rounding each row to 8192 on its own diagonal
       // can leave them 1 apart: the camera gets the first row three times (still black and white,
