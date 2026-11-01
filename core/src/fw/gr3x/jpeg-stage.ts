@@ -37,7 +37,8 @@ import { halationLutR6, halationModuleR6, paramBytesR6 } from './halation-r6';
 import type { HalationLightR6 } from './halation-r6';
 import { GR3X_DATESTAMP_DIAG_R6_CODE, GR3X_HALATION_STATUS_R6_CODE } from './picture-modules-r6';
 import { GRAIN_CODE } from './grain-code';
-import { GRAIN_AMOUNT, GRAIN_CELL, GRAIN_MAGIC, grainTone } from '../../color/grain';
+import { GRAIN_GAIN, GRAIN_MAGIC, grainTone } from '../../color/grain';
+import { GRAIN_COLOUR_TILES, GRAIN_LUMA_TILES } from '../../color/grain-tables';
 
 export const GR3X_JPEG_EXECUTE = 0x535047d4;
 export const GR3X_DEVELOP_LOOK_READ = 0x536db7f8;
@@ -151,17 +152,18 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
   }
   if (o.grain) {
     // As halation.c's context: the cache functions, the allocator, the stash; then the grain's
-    // tables (grain.ts) and the look map (film k is look 32 + k in the stash, as for the halation).
+    // tables (grain.ts, grain-tables.ts: brightness tables, gains, luma and colour tiles of small and
+    // large grain) and the look map (film k is look 32 + k in the stash, as for the halation).
     const tone = p.append(grainTone());
-    const head = new Uint8Array(12), hv = new DataView(head.buffer);
-    GRAIN_AMOUNT.forEach((v, i) => hv.setUint16(i * 2, v, true));
-    GRAIN_CELL.forEach((v, i) => hv.setUint16(6 + i * 2, v, true));
+    const tiles = [...GRAIN_LUMA_TILES, ...GRAIN_COLOUR_TILES].map(t => p.append(t));
+    const head = new Uint8Array(8), hv = new DataView(head.buffer);
+    GRAIN_GAIN.forEach((v, i) => hv.setUint16(i * 2, v, true));
     const context = (amount: number) => {
       const map = new Uint8Array(64);
       o.grain!.settings.forEach((v, k) => { map[GR3X_HALATION_FILM_STYLE + k] = v | amount; });
       return p.append(new Uint8Array([
         ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, tone]),
-        ...head.subarray(0, 10), 0, 0, ...u32le([GRAIN_MAGIC]), ...map,
+        ...head, ...u32le([GRAIN_MAGIC]), ...map, ...u32le(tiles),
       ]));
     };
     const code = () => p.append(Uint8Array.from(atob(GRAIN_CODE), c => c.charCodeAt(0)));
