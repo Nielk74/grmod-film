@@ -38,13 +38,33 @@ function display(L: number, a: number, b: number): RGB {
   return [toDisp(Math.min(1, Math.max(0, v[0]))), toDisp(Math.min(1, Math.max(0, v[1]))), toDisp(Math.min(1, Math.max(0, v[2])))];
 }
 
+/**
+ * The film's colour change x1.5, never past grey. A first version extrapolated a and b linearly: where a
+ * film removes colour (black and white, toned black and white) x1.5 overshot through grey into the
+ * complementary colour (Acros came out with a sepia sky and purple trees). Now:
+ *  - a film that adds colour: chroma x1.5 of its change;
+ *  - a film that removes some colour: the chroma ratio is extrapolated multiplicatively (never below 0);
+ *  - a film that removes almost all of it (chroma under about a third, as monochrome and toned films):
+ *    the film's own colour, toning included;
+ *  - hue turns are amplified only where both colours are clearly chromatic.
+ */
+function pushColour(x: RGB, f: RGB, k: number): [number, number] {
+  const cx = Math.hypot(x[1], x[2]), cf = Math.hypot(f[1], f[2]);
+  const r = cf / Math.max(cx, 1e-6);
+  const c = r >= 1 ? cx + k * (cf - cx) : cf * r ** ((k - 1) * smooth(0.25, 0.6, r));
+  const hx = Math.atan2(x[2], x[1]), hf = Math.atan2(f[2], f[1]);
+  const dh = ((hf - hx + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+  const h = hf + (k - 1) * dh * smooth(0.02, 0.05, cx) * smooth(0.02, 0.05, cf);
+  return [c * Math.cos(h), c * Math.sin(h)];
+}
+
 export function filmResponse(op: Op): Op {
   return c => {
     const x = lab(c), f = lab(op(c));
     const mid = smooth(0.2, 0.45, x[0]) * (1 - smooth(0.75, 0.95, x[0]));
     let L = x[0] + (1 + 0.5 * mid) * (f[0] - x[0]);
     L += 0.18 * (L - 0.5) * mid;
-    const a = x[1] + 1.5 * (f[1] - x[1]), b = x[2] + 1.5 * (f[2] - x[2]);
+    const [a, b] = pushColour(x, f, 1.5);
     const s = (1 + 0.12 * mid) * (1 - 0.2 * smooth(0.82, 1, L));
     return display(L, a * s, b * s);
   };

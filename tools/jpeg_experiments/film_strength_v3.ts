@@ -33,11 +33,28 @@ function display(L: number, a: number, b: number): RGB {
 function stronger(op: Op, kL: number, kC: number): Op {
   return c => {
     const x = lab(c), f = lab(op(c));
-    return display(x[0] + kL * (f[0] - x[0]), x[1] + kC * (f[1] - x[1]), x[2] + kC * (f[2] - x[2]));
+    const [a, b] = pushColour(x, f, kC);
+    return display(x[0] + kL * (f[0] - x[0]), a, b);
   };
 }
 
 const smooth = (lo: number, hi: number, x: number) => { const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo))); return t * t * (3 - 2 * t); };
+/**
+ * A film's colour change scaled by k, never past grey (examples/gr3x/film-pack-v3/response.ts). A first
+ * version extrapolated a and b linearly: on black-and-white films it overshot through grey into the
+ * complementary colour (Acros with a sepia sky and purple trees). Adding colour: chroma change x k;
+ * removing some: multiplicative (never below 0); removing almost all (monochrome, toned): the film's own
+ * colour; hue turns amplified only where both colours are clearly chromatic.
+ */
+function pushColour(x: RGB, f: RGB, k: number): [number, number] {
+  const cx = Math.hypot(x[1], x[2]), cf = Math.hypot(f[1], f[2]);
+  const r = cf / Math.max(cx, 1e-6);
+  const c = r >= 1 ? cx + k * (cf - cx) : cf * r ** ((k - 1) * smooth(0.25, 0.6, r));
+  const hx = Math.atan2(x[2], x[1]), hf = Math.atan2(f[2], f[1]);
+  const dh = ((hf - hx + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+  const h = hf + (k - 1) * dh * smooth(0.02, 0.05, cx) * smooth(0.02, 0.05, cf);
+  return [c * Math.cos(h), c * Math.sin(h)];
+}
 /**
  * "Film response": push a film the way negative + print film builds its look, instead of scaling every
  * difference from Standard (which doubles a film's faded black and compressed white too):
@@ -54,7 +71,7 @@ function filmResponse(op: Op): Op {
     const mid = smooth(0.2, 0.45, x[0]) * (1 - smooth(0.75, 0.95, x[0]));
     let L = x[0] + (1 + 0.5 * mid) * (f[0] - x[0]);
     L += 0.18 * (L - 0.5) * mid;
-    const a = x[1] + 1.5 * (f[1] - x[1]), b = x[2] + 1.5 * (f[2] - x[2]);
+    const [a, b] = pushColour(x, f, 1.5);
     const s = (1 + 0.12 * mid) * (1 - 0.2 * smooth(0.82, 1, L));
     return display(L, a * s, b * s);
   };
