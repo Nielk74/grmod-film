@@ -1,0 +1,9 @@
+{
+  "experiment": "Gold 200 / Endura, negative exposure 0 EV and +2 EV, fixed-filtration print compensation",
+  "parameters_and_evidence": "../approved.json",
+  "author": "Andrea Volpato",
+  "source": "https://github.com/andreavolpato/spektrafilm/tree/3bb2c2d2801ff68b92019cf1dbcbb133d60832bc/src/spektrafilm/data/profiles",
+  "license": "CC BY-SA 4.0",
+  "license_file": "../SPEKTRAFILM_LICENSE.txt",
+  "changes": "../CHANGELOG.txt"
+}
