@@ -6,7 +6,11 @@
  *  - every film pushed by "film response" (response.ts) instead of shipped as authored; a film whose
  *    pushed version the camera cannot hold (fit mean over 3 dE2000, or a post matrix beyond 12 bits)
  *    stays as authored. Four films get a gentler colour push, because x1.5 turned faces orange under
- *    warm light (COLOUR_PUSH);
+ *    warm light (COLOUR_PUSH). Portra 400, CineStill 800T and Gold 200 also get a soft highlight shoulder
+ *    (SHOULDER: white drops about 3 L*, as a negative's highlights roll off);
+ *  - every film is fitted with extra weight on the grey ends (END_GREY_WEIGHT): the plain fit gives up a
+ *    look's tinted white first, so Portra's cream white (255, 246, 234) came out (255, 254, 248) and Gold's
+ *    yellow white was half gone; held, they are as authored (core: convertPreset's endGreyWeight);
  *  - film 1 (Velvia, which the user dropped) replaced by "Pro 400H": Fujifilm Pro 400H on Fujicolor
  *    Crystal Archive paper, from stock datasheet data through tools/jpeg_experiments/film_datasheet_v3.py
  *    (the data is spektrafilm's, CC BY-SA 4.0: this .cube is not part of the repository). An earlier
@@ -50,6 +54,10 @@ const MAX_FIT = 3.0;
  * back to Standard's blue); Astia and Kodachrome 64 keep skin within about x1.2 of Standard. A global
  * push is the only lever: a cap on skin colours alone does not survive the camera fit. */
 const COLOUR_PUSH: Record<string, [number, number]> = { 'Gold 200': [1, 0], 'Nostalgic Neg': [1, 0], Astia: [1.2, 0.048], 'Kodachrome 64': [1.1, 0.024] };
+/** Extra copies of a grey ramp at both ends of the fit (2026-11-01, story chapters 33-34). */
+const END_GREY_WEIGHT = 24;
+/** The user's focus films get a highlight shoulder (OkLab L that white drops by; story chapter 35). */
+const SHOULDER: Record<string, number> = { 'Portra 400': 0.03, 'CineStill 800T': 0.03, 'Gold 200': 0.03 };
 
 const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
 if (!official || !film1Cube || !pictureDir || !out) {
@@ -83,7 +91,7 @@ function v3Recipe(look: Look): NonNullable<Look['recipe']> {
 }
 
 function fit(text: string): PresetResult | null {
-  try { return engine.convertPreset('cube', text); } catch { return null; }
+  try { return engine.convertPreset('cube', text, undefined, { endGreyWeight: END_GREY_WEIGHT }); } catch { return null; }
 }
 
 mkdirSync(join(out, 'cube'), { recursive: true });
@@ -98,8 +106,8 @@ for (const [i, base] of LOOKS.entries()) {
     if (!r) throw new Error('Pro 400H does not fit');
   } else {
     const push = COLOUR_PUSH[base.name];
-    const pushed: Look = { ...base, op: filmResponse(base.op, push?.[0], push?.[1]) };
-    text = cubeText(pushed); r = fit(text); look = pushed; how = push ? `film response, colour x${push[0]}` : 'film response';
+    const pushed: Look = { ...base, op: filmResponse(base.op, push?.[0], push?.[1], SHOULDER[base.name]) };
+    text = cubeText(pushed); r = fit(text); look = pushed; how = ['film response', push && `colour x${push[0]}`, SHOULDER[base.name] && 'shoulder'].filter(Boolean).join(', ');
     if (!r || r.meanDE2000! > MAX_FIT) {
       console.log(`film ${i + 1} ${base.name}: film response ${r ? `fits at ${r.meanDE2000!.toFixed(2)}` : 'does not fit'}; kept as authored`);
       look = base; text = cubeText(base); r = fit(text)!; how = 'as authored';
