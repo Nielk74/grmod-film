@@ -26,8 +26,8 @@ the film work on top, in two commits you can read. GR Mod's own documentation is
   relative to the 6000-pixel picture, so the screennail and thumbnail match.
 - **Film MTF** (`tools/filmmtf/filmmtf.c`, `core/src/color/filmmtf.ts`): a film's own sharpness, made at the JPEG step before the
   halation and the grain: Kodak's MTF curves per dye layer (a boost of 8..33 pixel structures, softer fine detail, the red layer
-  softest) on the main picture, in strips so it needs a few megabytes. Portra 400 only for now (`FILM_MTF` in
-  `examples/gr3x/film-pack-v3/build.ts`; its camera Sharpness and Clarity start at 0). About three times the grain's work per
+  softest) on the main picture, in strips so it needs a few megabytes. On every film of the v3 pack, with Kodak Portra 400's curves
+  (`FILM_MTF` in `examples/gr3x/film-pack-v3/build.ts`; the camera Sharpness and Clarity start at 0). About three times the grain's work per
   picture; checked against its TypeScript reference byte for byte in an emulator (`tools/filmmtf/check.py`), not tried on a camera.
 - **Halation colours**: red, orange, gold and white, kept in the film's Toning byte with the Halation state
   (`core/src/fw/gr3x/halation-rows.ts`). The parameter screen sizes its list for a film's 12..13 lines.

@@ -25,9 +25,9 @@
  *  - film sharpness (MTF) through the camera's own controls: Sharpness at most -1 (less of the camera's
  *    sharpening), Clarity +1 where a film does not set it (development's edge effects). The controls'
  *    exact response is not checked on a camera;
- *  - Portra 400's own sharpness (FILM_MTF): Kodak's MTF curves per dye layer, made in the JPEG step (core/src/color/filmmtf.ts,
+ *  - every film's own sharpness (FILM_MTF): Kodak Portra 400's MTF curves per dye layer, made in the JPEG step (core/src/color/filmmtf.ts,
  *    tools/filmmtf/filmmtf.c): a boost of 8..33 pixel structures and a softer fine detail, softest in the red layer. It replaces the
- *    camera's Sharpness and Clarity for that film (both start at 0) and runs before the halation and the grain. About 3 times the
+ *    camera's Sharpness and Clarity (both start at 0) and runs before the halation and the grain. About 3 times the
  *    grain's work per picture; not checked on a camera.
  * Not in the firmware: shoot films with Highlight Correction (D-Range) on in contrasty light; it is the
  * camera's own film latitude (one stop less exposure, pushed back in the JPEG) and a camera-wide setting.
@@ -62,8 +62,10 @@ const COLOUR_PUSH: Record<string, [number, number]> = { 'Gold 200': [1, 0], 'Nos
 const END_GREY_WEIGHT = 24;
 /** The user's focus films get a highlight shoulder (OkLab L that white drops by; story chapter 35). */
 const SHOULDER: Record<string, number> = { 'Portra 400': 0.03, 'CineStill 800T': 0.03, 'Gold 200': 0.03 };
-/** The films with their own sharpness, made in the JPEG step from the film's MTF (core/src/color/filmmtf.ts). Their Sharpness and Clarity start at 0. */
-const FILM_MTF = new Set(['Portra 400']);
+/** The films with their own sharpness, made in the JPEG step from the film's MTF (core/src/color/filmmtf.ts): all twenty. The curves are
+ * Kodak Portra 400's (the only stock measured here), so the other films get Portra's sharpness character. Their Sharpness and Clarity
+ * start at 0 (the film's MTF replaces them, and the authored values of the other films are dropped). */
+const FILM_MTF = new Set([...LOOKS.map(l => l.name), 'Pro 400H']);
 
 const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
 if (!official || !film1Cube || !pictureDir || !out) {
