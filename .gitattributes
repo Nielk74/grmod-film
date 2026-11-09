@@ -1,2 +1,7 @@
 # The Direct Flash test pins the SHA-256 of this exact source: keep LF on every platform.
 tools/directflash/directflash.c text eol=lf
+
+# Preserve the exact bytes bound by the GR III session checksums.
+research/gr3-210/test-session/ready/TEST-CARD.md -text
+research/gr3-210/test-session/ready/SESSION-MANIFEST.json -text
+research/gr3-210/test-session/ready/SHA256SUMS.txt -text

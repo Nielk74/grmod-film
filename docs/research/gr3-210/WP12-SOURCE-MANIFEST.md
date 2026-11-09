@@ -1,10 +1,12 @@
 # WP12 follow-up — informational preview input readback
 
+> Historical stage record. Firmware/replay environment requirements and current verification limits are qualified in [the shared index](../../GR3_EXPLORATION_REPORT.md). Packet-wide hash assertions below describe the original snapshot; the card metadata was intentionally revised later.
+
 Base: `db76c9b42f85d657a760d07af97735854f253c57`. **Closed no-go: the six-file implementation below was not executed.** The ignored bounded prototype is `research/gr3-210/wp12-preview-source-01`. Independent review triggered the declared malformed-input kill; the completed desktop MTF sources remain fixed.
 
 ## Preserved preceding result
 
-The completed desktop MTF round has 263 passing tests, 175 private-fixture skips, passing core/UI typechecks/build and actual browser gates. Its thirteen exact source files are preserved under `research/gr3-210/wp12-source-final/files`, as an overlay on the earlier round-one snapshot. Overlay manifest SHA-256: `4125724f23681057b503622fd3d42b69ec563259d40769220f2941bc47077fda`. The sealed camera packet, its manifests and preceding evidence remain fixed.
+The completed desktop MTF round has 263 passing tests, 175 skips (including GR IIIx/IV fixture paths), passing core/UI typechecks/build and actual browser gates. Its thirteen exact source files are preserved under `research/gr3-210/wp12-source-final/files`, as an overlay on the earlier round-one snapshot. Overlay manifest SHA-256: `4125724f23681057b503622fd3d42b69ec563259d40769220f2941bc47077fda`. The sealed camera packet, its manifests and preceding evidence remain fixed.
 
 The source-consumer search covered `ui`, `core`, `tools` and `docs` for `PreviewOriginal`, `previewJpeg`, `loadPreviewFile` and `previewOriginal`. There is no rename or native refactor. The six existing paths below are the complete implementation boundary.
 

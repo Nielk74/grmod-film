@@ -1,5 +1,7 @@
 # WP1 — one flat verified source checkpoint
 
+> Historical stage record. Firmware/replay environment requirements and current verification limits are qualified in [the shared index](../../GR3_EXPLORATION_REPORT.md). Packet-wide hash assertions below describe the original snapshot; the card metadata was intentionally revised later.
+
 Declared before checkpoint copies or archive creation on 2026-11-09. Base `db76c9b42f85d657a760d07af97735854f253c57`; current branch `codex/gr3-crop-texture`. This consolidates verified local source bytes after the completed comparison-crop round. It does not change product code or reopen closed experiments.
 
 **Claim and purpose:** ten chronological overlays are useful audit history but awkward to restore. Git uses `core.autocrlf=true` here; a patch alone does not preserve the verified raw file bytes. Produce one flat overlay of the complete 170 composed code/config paths, accompanied by current decision documents and explicit exact-base restoration instructions.
@@ -26,7 +28,7 @@ No production/config/test file, Git index/branch/history, dependency installatio
 
 Capture the decision documents once root's crop closure and this plan are saved. Copy source/docs bytes without conversion. Record SHA-256, bytes, base membership and source-relative names. Include a bounded self-contained verifier that checks manifest paths and archived bytes without writing the repository. Create one local ZIP; independently enumerate its members, reject extras/unsafe/duplicate paths, decode and hash every archived file. An independent verifier must not import the packager. Exercise malformed path/missing/corrupted-byte controls against in-memory or disposable checkpoint-only fixtures; never alter the live tree or existing evidence. Do not auto-apply the archive or run a Git checkout/reset.
 
-The just-completed source is tested by 329 full passes / 175 private-fixture skips, typechecks/build and independent source/browser acceptance. Packaging adds no product change; byte/readback verification is its additional gate. Recheck live 170 pins, fixed coefficients and sealed packet after packaging. Keep existing epoch manifests immutable.
+The just-completed source is tested by 329 full passes / 175 skips (including GR IIIx/IV fixture paths), typechecks/build and independent source/browser acceptance. Packaging adds no product change; byte/readback verification is its additional gate. Recheck live 170 pins, fixed coefficients and sealed packet after packaging. Keep existing epoch manifests immutable.
 
 Restoration requires a separate checkout at the exact base, applying raw files to their repository-relative paths, and verifying them before dependency install/build. The checkpoint is not a complete repository or full evidence backup. Exclude firmware binaries/derived research, original media, `node_modules`, runtime junctions, caches and `ui/dist`; unchanged assets and lockfiles come from the Git base. No release, license clearance, install/flash provenance or camera result follows.
 

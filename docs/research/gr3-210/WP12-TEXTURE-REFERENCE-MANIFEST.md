@@ -1,5 +1,7 @@
 # WP12 — isolate the existing texture in the photo comparison
 
+> Historical stage record. Firmware/replay environment requirements and current verification limits are qualified in [the shared index](../../GR3_EXPLORATION_REPORT.md). Packet-wide hash assertions below describe the original snapshot; the card metadata was intentionally revised later.
+
 Authorized 2026-11-09 before source/test edits. Base `db76c9b42f85d657a760d07af97735854f253c57`. The texture/detail reuse correction is closed; capture and verify the raw parent/preimages before dispatching implementation. Shared source paths are edited sequentially.
 
 Source-only feasibility (`research/gr3-210/wp12-texture-reference-01/REPORT.md`) and independent plan review (`research/gr3-210/wp12-texture-reference-plan-review/REPORT.md`) give conditional GO. The gap is simultaneous comparison of one film's colour against that same colour plus its existing texture. Available static experimental viewers do not provide the current original/slot/texture contract. The brief's named `portra-compare` source was not located and is not claimed audited. Reuse the current divider, loupe, colour stage, texture functions and worker.
@@ -44,7 +46,7 @@ Root considered orienting the colour-only output before texture processing, whic
 
 ## Verified result
 
-The exact four source/test paths are implemented and settled. Three meaningful feature failures became green while three prior controls stayed green; the full focused preview file passes 12/12. Independent source review has no actionable finding. Core/UI typechecks, production build and diff pass; full suite **316 passed / 175 private-fixture skips**, including the existing independently decoded official receipt replay with its evidence writer disabled.
+The exact four source/test paths are implemented and settled. Three meaningful feature failures became green while three prior controls stayed green; the full focused preview file passes 12/12. Independent source review has no actionable finding. Core/UI typechecks, production build and diff pass; full suite **316 passed / 175 skips (including GR IIIx/IV fixture paths)**, including the existing independently decoded official receipt replay with its evidence writer disabled.
 
 Actual Edge 157.0.4341.42 passes seventeen gates on `index-SvRV4dla.js` and `preview.worker-CIZKQSol.js`. Old/new default Source pixels and params/options are exact; both reference modes retain the same textured right. Film colour left equals a separately rendered all-textures-Off result. Loading/error/current ownership, rapid changes, replacement/model/restart, unchanged storage and zero inspection jobs pass. English/Chinese fit 980 × 640, including physical 1:1 at DPR 1–2. Root and the browser reviewer inspected the three settled screenshots. All host APIs stayed in memory, with zero firmware builds, conversions or page errors; no direct pending-build-arguments observation is claimed.
 

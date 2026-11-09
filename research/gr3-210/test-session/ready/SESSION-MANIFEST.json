@@ -1,0 +1,134 @@
+{
+  "schema": 1,
+  "kind": "GR3-210-TEST-SESSION-1",
+  "status": "HOST-VERIFIED-CAMERA-TEST-CANDIDATES",
+  "camera": "GR III",
+  "firmwareVersion": "2.10",
+  "hardwareTested": false,
+  "deviceWritten": false,
+  "sourceBase": "db76c9b42f85d657a760d07af97735854f253c57",
+  "texture": {
+    "file": "T-texture/fwdc239b.bin",
+    "sha256": "631974813579e055a65f80c1558133acd7f27259edf2b4dcfb9dc052c2f21768",
+    "sourceManifest": "../../builds/t-texture-sensor-01/research-manifest.json",
+    "review": "../../wp2-review.md",
+    "checks": {
+      "corePassed": 249,
+      "coreSkipped": 175,
+      "typecheck": true,
+      "independentReviewNoOpenFindings": true,
+      "freshEngineReconstruction": true,
+      "independentPythonDecoder": true,
+      "nativeModuleParity": true,
+      "pipelineProbeStashStates": 3528
+    },
+    "policy": "sensor",
+    "libraryChange": "Gold +2 EV (approved) replaces Pro 400H in slot 64; other 19 film colours remain exact.",
+    "adjChoice": "Keep existing Soft Focus; no ADJ Grain replacement.",
+    "fullCoreEvidence": "../../wp2-implementation/core-suite-final.log",
+    "pipelineEvidence": "../../wp2-implementation/sensor-probe/stage-report.json"
+  },
+  "colour": {
+    "file": "T-colour/fwdc239b.bin",
+    "sha256": "d761ea15d50aeaecee0d08e44e63a00cb4dc0899a405c89fd5e8afd988502283",
+    "sourceManifest": "../../t-colour-host-20261109-r2/diagnostic-manifest.json",
+    "review": "../../tcolour-review.md",
+    "sourceSha256Lf": "29c9f27f619c9d6ec30c573c1116962ac41e5d46ca57ffe5c9689ac0cb37c39f",
+    "generalEngineMustRejectDiagnostic": true,
+    "checks": {
+      "pristineBaseFreshEngineVerified": true,
+      "deterministicReapplyByteIdentical": true,
+      "reverseToEveryBaseByte": true,
+      "independentPythonDecoder": true,
+      "independentRetainedPayloadAndProbeAudit": true,
+      "nativeUpdaterLoaderRegression": true,
+      "readOnlyRepeatVerifyAll12ArtifactHashesUnchanged": true,
+      "sourceSnapshotAll137HashesMatch": true,
+      "strictTypecheckAndProbeSelfTest": true,
+      "independentReviewNoOpenFindings": true
+    },
+    "textures": "No grain/MTF/date/ADJ Soft Focus modules; all 20 halation gain headers are zero.",
+    "slots": "Six retained exact colour presets in 64-69; fourteen diagnostics A-N in 70-83.",
+    "repeatVerificationEvidence": "../../tcolour-review-idempotence.json",
+    "decodedAuditEvidence": "../../tcolour-review-decoded.json"
+  },
+  "return": {
+    "file": "Return-current-MTF/fwdc239b.bin",
+    "sha256": "cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55",
+    "verifiedLocalArtifact": true,
+    "installedCameraIdentityEstablished": false
+  },
+  "commonCard": "TEST-CARD.md",
+  "deferred": "WP9 same-DNG grain/halation matrix: no verified RAW halation editing route; no new encoder tracing.",
+  "requirements": [
+    "Human operator performs any camera or SD-card operation.",
+    "Full documented section 5 reset before every changed/reduced library and before return.",
+    "Never store diagnostic looks or added ratios in U1/U2/U3.",
+    "Stay on firmware 2.10.",
+    "Camera behavior and aesthetic preference remain unverified."
+  ],
+  "slots": "SLOTS.csv",
+  "artifacts": [
+    {
+      "path": "Return-current-MTF/fwdc239b.bin",
+      "bytes": 38408796,
+      "sha256": "cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55"
+    },
+    {
+      "path": "SLOTS.csv",
+      "bytes": 1793,
+      "sha256": "2041d6f157bab176121913520473c21058a2cd5e98d8013eb00aa34f1dc8e6f4"
+    },
+    {
+      "path": "T-colour/diagnostic-manifest.json",
+      "bytes": 34865,
+      "sha256": "30072c873d64b204c1353943ebfb37ada224e39d8c0b42e630df9a2c32a8728c"
+    },
+    {
+      "path": "T-colour/diagnostic-recipe.json",
+      "bytes": 26714,
+      "sha256": "403ab6212e00c728124d9cfa5515102de2f969f413b39f950bceadd3e3a64fd6"
+    },
+    {
+      "path": "T-colour/fwdc239b.bin",
+      "bytes": 37840152,
+      "sha256": "d761ea15d50aeaecee0d08e44e63a00cb4dc0899a405c89fd5e8afd988502283"
+    },
+    {
+      "path": "T-colour/independent-verification.json",
+      "bytes": 8806,
+      "sha256": "769e7f2bdf9dff77811117111896c4afd4d9b64ec504da77957dab9797b571be"
+    },
+    {
+      "path": "T-colour/verification.json",
+      "bytes": 1215,
+      "sha256": "9ef1b30834c01ef602ddcaf465f79030b68eb316158c286c522ebba76958698c"
+    },
+    {
+      "path": "T-texture/build-report.json",
+      "bytes": 61981,
+      "sha256": "b5410707a4e552d08d850430ab4612ea9c5fb5485e516c7815b2a5495879a027"
+    },
+    {
+      "path": "T-texture/fwdc239b.bin",
+      "bytes": 38408796,
+      "sha256": "631974813579e055a65f80c1558133acd7f27259edf2b4dcfb9dc052c2f21768"
+    },
+    {
+      "path": "T-texture/independent-verification.json",
+      "bytes": 820,
+      "sha256": "cc0a5ae31f60332f2674d518486cc25cdcb9149b98b6530d320ecf4ddf2591b4"
+    },
+    {
+      "path": "T-texture/research-manifest.json",
+      "bytes": 28562,
+      "sha256": "a571dcfda902abb22210c9fd040e1c8e137ce00aef2c6eb5fc0b2f62e5e50299"
+    },
+    {
+      "path": "TEST-CARD.md",
+      "bytes": 9818,
+      "sha256": "6908b79364c5e57eed9032c728813c1a436c3c56680a46adce9cfc3e09bdb59b"
+    }
+  ],
+  "promotionNote": "The source manifests retain their initial review-pending status as immutable build evidence; this session manifest records the later completed independent reviews and local filename promotion."
+}

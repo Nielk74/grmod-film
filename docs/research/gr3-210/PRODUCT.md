@@ -1,33 +1,27 @@
-# WP11–12 — focusing and small product wins
+# WP11–12 — saved host tools and evidence limits
 
-Base: `db76c9b42f85d657a760d07af97735854f253c57`. Updated 2026-11-09. Root maintains this decision page; raw evidence stays in the linked round reports.
+Base `db76c9b42f85d657a760d07af97735854f253c57`. Updated 2026-11-09. No new desktop feature is authorized in this remediation.
 
-## Completed host tools
+**Claim / source and browser evidence:** the completed host tools are saved locally in `a0bdde5`. Their bounded implementation manifests preserve file scope and detailed checks:
 
-| Feature | Decision and useful behavior | Evidence / reopening gate |
-|---|---|---|
-| Desktop MTF | Optional recipe/build flag and full attached-original preview; physical 1:1, stored geometry and EXIF 1–8 | [Implementation](../../../research/gr3-210/wp12-browser/REPORT.md), [manifest](WP12-MANIFEST.md); reopen for a concrete compatibility/rendering failure |
-| Development startup | Static environment-specific worker constructors support dev/module and production/classic | [One-file fix](../../../research/gr3-210/wp12-dev-bootstrap/REPORT.md), [manifest](WP12-DEV-MANIFEST.md); revert for mode/transport regression |
-| Portable build receipt | Modified folder export pairs firmware with owned arguments/assets/input-output checksums; unknown exact builder revision stays null | [Report](../../../research/gr3-210/wp12-build-receipt-implementation/REPORT.md), [manifest](WP12-RECEIPT-MANIFEST.md); reject lost binding, false verification or changed unsupported paths |
-| Reset / return guide | Optional bilingual reading region reuses the complete existing instructions and historical qualifiers | [Report](../../../research/gr3-210/wp12-reset-guidance-implementation/REPORT.md), [manifest](WP12-RESET-MANIFEST.md); reject ungrounded gestures, blocked export or unreadable instructions |
-| Approved Gold | Separate exact optional rendering outside the default twenty; direct frozen coefficients, preserved independent controls and honest unavailable intent | [Exposure decision](EXPOSURE.md), [manifest](WP4-APPROVED-GOLD-MANIFEST.md); reject refit/fallback/default replacement |
-| Film order | Reuse existing reorder/hide/reset; stable slot/requested-source identities distinguish duplicate aliases | [Report](../../../research/gr3-210/wp12-film-order-implementation/REPORT.md), [manifest](WP12-FILM-ORDER-MANIFEST.md); reject payload/default changes or inaccessible ambiguity |
-| Reuse texture/detail | Immediate guarded pull between active ready films preserves colour/sky/identity and latent Off choices | [Report](../../../research/gr3-210/wp12-texture-reuse-implementation/REPORT.md), [manifest](WP12-TEXTURE-REUSE-MANIFEST.md); reject stale commits, aliasing or excluded-field overwrite |
-| Same-film comparison | Source / Film colour uses the existing divider/loupe; colour-only left versus identical colour plus texture | [Report](../../../research/gr3-210/wp12-texture-reference-implementation/REPORT.md), [manifest](WP12-TEXTURE-REFERENCE-MANIFEST.md); reject changed default/right pixels, stale labels or unjustified buffers/work |
-| Save centre crop | One annotated PNG preserves two unscaled native-pixel centre panels from the current full Film colour pair | [Report](../../../research/gr3-210/wp12-comparison-crop-implementation/REPORT.md), [manifest](WP12-COMPARISON-CROP-MANIFEST.md); reject resampling, stale identity, unsafe save lifetime or unbounded work |
-| Preview explanation | Existing bilingual Recipe notes already separate previewed colour/texture from native Sharpness/Clarity/Shading | [Source audit](../../../research/gr3-210/wp12-preview-meaning-01/REPORT.md); adequate copy triggers reuse/stop, no correction |
+| Tool | Behavior / evidence |
+|---|---|
+| Desktop MTF | Optional builder flag and full attached-original preview; physical 1:1 and EXIF handling. [Manifest](WP12-MANIFEST.md) |
+| Worker startup | Environment-specific dev/module and production/classic constructors. [Manifest](WP12-DEV-MANIFEST.md) |
+| Build receipt | Submitted arguments/assets plus input/output binding; exact builder revision unknown. [Manifest](WP12-RECEIPT-MANIFEST.md) |
+| Reset/return help | Existing five reset steps and historical qualifiers, bilingual keyboard/scroll checks. [Manifest](WP12-RESET-MANIFEST.md) |
+| Optional approved Gold | Direct frozen coefficients outside default twenty; unavailable intent remains explicit. [Manifest](WP4-APPROVED-GOLD-MANIFEST.md) |
+| Film ordering | Existing reorder/hide/reset plus stable slot/requested-source labels. [Manifest](WP12-FILM-ORDER-MANIFEST.md) |
+| Texture/detail reuse | Immediate guarded pull preserves colour/identity and latent Off choices. [Manifest](WP12-TEXTURE-REUSE-MANIFEST.md) |
+| Same-film comparison | Colour-only left versus unchanged textured right using existing planes. [Manifest](WP12-TEXTURE-REFERENCE-MANIFEST.md) |
+| Centre-crop PNG | Two unscaled native centre panels, owned metadata, bounded save lifetime. [Manifest](WP12-COMPARISON-CROP-MANIFEST.md) |
 
-The latest closed crop-export epoch passes **329 tests / 175 private-fixture skips**, 25 focused tests, core/UI typechecks/build/diff, independent source review and 26 actual Edge gates. Five independently decoded PNGs preserve the two exact 512 × 512 native centre panels of a 24 MP comparison. English/Chinese annotations and 980 × 640 keyboard layouts pass. The shared save guard survives remounts; unrelated volume refresh stays current, stale work refuses before dispatch, and dispatched captured files still verify. Errors remain honest about possible files. Saving changes no project/storage or compared pixels and starts no additional processing/conversion/build work. All host APIs were intercepted in memory.
+**Verification qualification:** the recorded crop-export gate is 329 passed / 175 skipped only with official GR III firmware and receipt replay enabled, evidence-writing unset. Plain is 304/200; skips include GR IIIx/IV paths. [Shared index](../../GR3_EXPLORATION_REPORT.md) gives exact environment requirements; final remediation logs record reruns.
 
-All 170 composed code/config pins, four coefficient records and thirteen sealed packet hashes match; both workers and CSS remain byte-identical. [Source overlay](../../../research/gr3-210/wp12-comparison-crop-implementation/source-final.json) SHA-256: `46c67052bacb04438d3400bfb79d1ad58389188e0d9c7e1ec08eaf0e8e3f25b6`. The 203-file artifact manifest is verified; servers stopped. The export uses a fixed centre, not the loupe viewport. Existing overwrite semantics, bounded encoder/GC uncertainty and software/native-preview limits remain explicit. These tools do not approve appearance or establish camera behavior; the next image decisions require actual preference or camera pixels.
+The crop browser gate has 26 actual Edge steps and five independent PNG decodes matching paired 512×512 native centre pixels. English/Chinese labels and minimum-window keyboard layouts pass; stale pre-dispatch jobs refuse, dispatched captured snapshots still verify, and busy state survives remount. **All host APIs were intercepted in memory: acceptance.json records realApiWrites = 0. No PNG save passed through the real Go shell.** These checks do not establish real-shell saving or camera behavior. [Browser evidence](../../../research/gr3-210/wp12-comparison-crop-browser/acceptance.json).
 
-## Native and source-contract stops
+The historical source overlay comprised 170 raw code/config paths: 47 real changes and 123 EOL-only differences. Four colour payloads and all packet firmware bytes remain fixed. The card metadata was intentionally revised later; historical thirteen-file packet assertions describe their original snapshot. [Current card revision](../../../research/gr3-210/review-remediation-01/card-revision.json).
 
-- **Snap / Hyperfocal:** [bounded no-go](../../../research/gr3-210/wp11-snap-feasibility-01/REPORT.md). The known table/DOF helper lacks verified label-index ownership and a live-aperture refresh contract. Keep stock distances; no AF tracing.
-- **EXIF Software provenance:** [no-go](../../../research/gr3-210/wp12-provenance-01/REPORT.md). Serialized padding does not prove writer capacity/ownership. Keep host receipts; they do not prove installation or a photo's origin.
-- **Texture status `G2 H1 gold`:** [no-go](../../../research/gr3-210/wp12-texture-status-01/REPORT.md). Missing mutable text ownership/lifetime, width/refresh and live/playback join triggers stop.
-- **ImageTone source classifier:** [strict prototype](WP12-SOURCE-MANIFEST.md) failed malformed-field/link controls and was not integrated. A recorded tag cannot prove neutral or unedited pixels. Use Standard sources without a new classifier.
-- **ADJ Grain:** T-texture explicitly preserves Soft Focus. The external shared-function replacement needs an explicit build choice; bypass remains omitted.
-- **Reset to build recipe:** no owner-generation-safe widget binding; parked. Dynamic favorites, navigation-step modelling and temporary texture bypass remain outside scope.
+**Scoped native no-go results retained:** Snap/Hyperfocal lack label-index/live-aperture ownership; EXIF Software lacks writer capacity/ownership; status text lacks lifetime/refresh joins; recorded ImageTone does not prove neutral pixels. ADJ Grain's shared-function tradeoff is deferred to preserve Soft Focus. No new tracing follows those results.
 
-ROI acceleration stays deferred: the padded aligned MTF strip proof does not validate full-scene halo/grain or browser ownership. Full originals remain session-only; restart retains recipe flags but requires reattachment and an explicit unresized-main declaration. No peak-memory, camera recovery, film-fidelity or performance guarantee follows from these host tools. The sealed camera session remains fixed and untested; the user flashes. No release or device/card operation is authorized by this page.
+**Next / kill:** use existing tools and judge the [seven sheets](../../../research/gr3-210/USER-DECISIONS.md). Reject resampling, stale/mislabeled output or unsafe save ownership; do not infer aesthetic approval from pixels matching. ROI, memory/performance guarantees, native Sharpness/Clarity/Shading simulation and installation provenance remain unproved. User preference/camera returns are pending, not a blanket declaration that no further host direction exists. Stop after this round's checks and local commit.

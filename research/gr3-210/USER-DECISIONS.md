@@ -1,0 +1,21 @@
+# Your decisions — GR III 2.10
+
+2026-11-09. No new look has been adopted. Open each original sheet at 100% for detail judgments; the chat preview may shrink it. All paths below are under `C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/`.
+
+| Sheet / file path | What to look at | Your decision |
+|---|---|---|
+| [wp4-cinestill-01/review/cinestill-latitude-one-round.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/wp4-cinestill-01/review/cinestill-latitude-one-round.png) | Skin, cream highlights and yellow/olive sky at 0, +1 and +2 EV. This Vision3 exposure/print model has a separate baseline from authored CineStill. | Prefer 0, +1, +2, or none? |
+| [wp4-portra-optin-01/review/portra-optin-one-round.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/wp4-portra-optin-01/review/portra-optin-one-round.png) | Rosy/cream skin shifts at +1/+2 versus the sheet's 0 EV model. Shipped Portra colour stays unchanged. | Is any version worth a separate optional slot, or keep existing Portra only? |
+| [wp6-grain-01/wp6-grain-character-01-sheet.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/wp6-grain-01/wp6-grain-character-01-sheet.png) | Colour speckle in flat areas and skin: baseline versus A/B, with added luma grain held fixed. | For each film, prefer baseline, A, B, or no useful difference? |
+| [wp6-grain-02/wp6-grain-character-02-sheet.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/wp6-grain-02/wp6-grain-character-02-sheet.png) | Clump shape in ISO 100/3200 patches, baseline versus candidate. Existing camera noise remains; this is not ISO 5000 cleanup. | Prefer either clump structure for any film, or no useful difference? |
+| [halation-night-baseline-01/night-halation-off-on-sheet.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/halation-night-baseline-01/night-halation-off-on-sheet.png) | Lamp/window spread, skin and shadows: exact historical v3 profile, Off versus level 1 Gold. Host renders, not camera validation. | Is the glow useful, excessive, or indistinguishable? |
+| [review-remediation-01/mtf-proxy/sheet.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/review-remediation-01/mtf-proxy/sheet.png) | Native daylight/night edge detail: accepted MTF versus one finest-band candidate, neutral luma matched. **Vision3 ordering proxy, not measured CineStill.** Grain/halation Off. | At 100%, can you see a useful difference, and which side do you prefer? |
+| [review-remediation-01/haze/native-crops.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/review-remediation-01/haze/native-crops.png), [whole-frame-contexts.png](C:/Users/Antoine/.codex/worktrees/3840/grmod-film/research/gr3-210/review-remediation-01/haze/whole-frame-contexts.png) | Approved Gold, current Gold and Portra at Off/1/Medium Gold halation. Both preview paths show yellow facade haze; provisionally too strong here, without a demonstrated preview defect. This desktop profile differs from the historical night sheet. | Which settings, if any, suit bright daylight highlights? No strengths have changed. |
+
+**Focus:** which actually hurts: low-light hunting, macro, wrong target, speed, or none? This required choice was previously skipped; AF remains pending your answer. No AF work is authorized in this round.
+
+**Crop policy:** sensor scaling cannot distinguish 4800/3360 px true resizes from 35/50 mm crops; XS receives MTF designed for a 6000 px frame. Judge the revised camera card's crop/XS results before choosing sensor, output, or neither. Adoption remains blocked.
+
+**Before public shipping:** approved Gold data is attributed CC BY-SA 4.0; code is GPL-2.0-only, including embedded numeric assets in the UI. [Creative Commons lists GPLv3 compatibility in one direction](https://creativecommons.org/compatible-licenses/), not GPL-2.0-only. Choose a distribution/licensing treatment to have reviewed, obtain compatible permission, or exclude these assets from public builds. Existing attribution alone does not establish clearance; no licence change or publication has occurred.
+
+After these choices, use the revised `test-session/ready/TEST-CARD.md` for the optional operator session. No further host round starts automatically.

@@ -1,25 +1,17 @@
-# WP10 — autofocus frozen pending a named failure and baseline
+# WP10 — pending the required user choice
 
-Base: `db76c9b42f85d657a760d07af97735854f253c57`. Updated 2026-11-09.
+Base `db76c9b42f85d657a760d07af97735854f253c57`. Updated 2026-11-09.
 
-**Claim:** the exploration mapped AF controls and acquisition boundaries but demonstrated no improvement in speed or accuracy.
+**Claim / source, emulation and metadata:** the exploration mapped AF controls/acquisition boundaries, but demonstrated no physical speed or accuracy improvement. Caf preparation is reached; actual hardware statistics/responses and acquisition timing/error ground truth remain missing.
 
-**Evidence class:** source, emulated functions and photo metadata. Delivered requests reach actual Caf preparation; hardware property/statistics responses remain outside the verified path. Real AFInfo records do not provide acquisition timing or error ground truth.
+**Correction:** the previous page applied the brief's kill without presenting its required question. Missing an answer to a skipped question is not evidence that stock AF is acceptable. WP10 is **pending the user's answer**.
 
-**Decision:** freeze all AF tracing, predictor/threshold/lens tuning and orientation-point recall. Keep the reusable address/evidence map. The user requested exploration of AF, but has not named a failure that justifies further tuning; apply the brief's kill criterion without another question.
+**Next decision:** [USER-DECISIONS](../../../research/gr3-210/USER-DECISIONS.md) asks which actually hurts: low-light hunting, macro, wrong target, speed, or none. No AF work occurs in this remediation round.
 
-**Next step:** only reopen after a specific problem and a stock baseline exist. A future baseline uses fixed targets, controlled starting focus, phone high-frame-rate recording and sharpness of captured results. It does not require modified firmware.
+If later authorized after a named problem, establish a stock baseline with fixed targets, controlled initial focus, phone high-frame-rate recording and sharpness of captured results. No modified firmware is needed for that baseline. Only a demonstrated worthwhile failure could justify a later passive trace build; no such result exists now.
 
-**Kill criterion:** no named failure, or acceptable stock behavior: keep AF frozen.
+**Kill:** an actual user answer of none, or acceptable measured stock behavior, can close AF improvement work. This criterion is not yet satisfied. Preserve the symbol map and pause tracing/tuning meanwhile.
 
-**Limit:** no timing unit, confidence threshold or synthetic wave experiment establishes a physical improvement.
+**Preserved conclusions:** temporary Select AF is stock; metadata AF-point positions do not prove accuracy; low clock words/failed reads are not acquisition timing; hidden scan-range static tracing stays closed. Orientation recall lacks owner-generation/state-change contracts. Threshold, predictor and lens tuning remain inactive.
 
-## Preserved conclusions
-
-- Hidden scan-range static tracing is closed. If justified later, one controlled hardware dialog test replaces further tracing.
-- Temporary Select AF is already a stock function; the redundant candidate is dropped.
-- Metadata AF-area coordinates and crop clamping are reusable evidence, not proof of focus accuracy.
-- Command packets retain only the low clock word and can stamp zero on failed reads. They are not acquisition measurements.
-- Orientation recall must not treat record-pointer identity as owner generation or blindly invoke touch-AF's state-changing path. This is retained as a caution, not an active feature task.
-
-Any passive trace build is later work and must first have a baseline, a named result path and bounded per-photo/RAM storage. No new file-I/O path or AF tune belongs in T-texture or T-colour.
+**Limit:** timing assumptions, synthetic blur/wave metrics and emulator case counts cannot establish physical AF improvement. No AF candidate belongs in T-texture or T-colour.
