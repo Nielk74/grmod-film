@@ -131,3 +131,81 @@ export function rgbaToCanvas(canvas: HTMLCanvasElement, rgba: Uint8Array, w: num
   canvas.width = w; canvas.height = h;
   const g = canvas.getContext('2d')!; const im = g.createImageData(w, h); im.data.set(rgba); g.putImageData(im, 0, 0);
 }
+
+/** Stored JPEG raster geometry, before EXIF display orientation. APP1 is removed only from the decode copy. */
+export interface PreviewJpeg { width: number; height: number; orientation: number; bytes: Uint8Array }
+export interface PreviewPixels { width: number; height: number; data: Uint8ClampedArray<ArrayBuffer> }
+export interface PreviewOriginal { blob: Blob; width: number; height: number; orientation: number }
+
+export function previewJpeg(bytes: Uint8Array): PreviewJpeg | null {
+  if (bytes[0] !== 255 || bytes[1] !== 216) return null;
+  let p = 2, width = 0, height = 0, orientation = 1;
+  const chunks: Uint8Array[] = [bytes.subarray(0, 2)];
+  while (p < bytes.length) {
+    const start = p;
+    if (bytes[p++] !== 255) return null;
+    while (bytes[p] === 255) p++;
+    const marker = bytes[p++];
+    if (marker === 218 || marker === 217) {
+      if (!width || !height) return null;
+      chunks.push(bytes.subarray(start));
+      const clean = new Uint8Array(chunks.reduce((n, x) => n + x.length, 0));
+      let at = 0; for (const x of chunks) { clean.set(x, at); at += x.length; }
+      return { width, height, orientation, bytes: clean };
+    }
+    if (p + 2 > bytes.length) return null;
+    const length = (bytes[p] << 8) | bytes[p + 1], end = p + length;
+    if (length < 2 || end > bytes.length) return null;
+    if (marker === 225 && length >= 8 && String.fromCharCode(...bytes.subarray(p + 2, p + 8)) === 'Exif\0\0') {
+      try {
+        const t = p + 8, view = new DataView(bytes.buffer, bytes.byteOffset + t, end - t);
+        const le = view.getUint16(0) === 0x4949;
+        if ((!le && view.getUint16(0) !== 0x4d4d) || view.getUint16(2, le) !== 42) return null;
+        const ifd = view.getUint32(4, le), count = view.getUint16(ifd, le);
+        if (ifd + 2 + count * 12 > view.byteLength) return null;
+        for (let i = 0; i < count; i++) {
+          const at = ifd + 2 + i * 12;
+          if (view.getUint16(at, le) !== 0x112) continue;
+          if (view.getUint16(at + 2, le) !== 3 || view.getUint32(at + 4, le) !== 1) return null;
+          orientation = view.getUint16(at + 8, le);
+          if (orientation < 1 || orientation > 8) return null;
+        }
+      } catch { return null; }
+    }
+    if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker)) {
+      if (length < 8) return null;
+      height = (bytes[p + 3] << 8) | bytes[p + 4]; width = (bytes[p + 5] << 8) | bytes[p + 6];
+    }
+    if (marker !== 225) chunks.push(bytes.subarray(start, end));
+    p = end;
+  }
+  return null;
+}
+
+/** Decode the complete unrotated raster. Removing metadata avoids browser-specific EXIF decode behavior. */
+export async function decodeStoredPreview(original: PreviewOriginal): Promise<PreviewPixels> {
+  const jpeg = previewJpeg(new Uint8Array(await original.blob.arrayBuffer()));
+  if (!jpeg || jpeg.width !== original.width || jpeg.height !== original.height || jpeg.orientation !== original.orientation || jpeg.width > 12000 || jpeg.height > 12000 || jpeg.width * jpeg.height > 24000000) throw new Error('Unsupported original JPEG geometry');
+  const bitmap = await createImageBitmap(new Blob([jpeg.bytes as unknown as BlobPart]));
+  try {
+    if (bitmap.width !== jpeg.width || bitmap.height !== jpeg.height) throw new Error('Stored JPEG raster mismatch');
+    const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const g = canvas.getContext('2d', { willReadFrequently: true })!;
+    g.drawImage(bitmap, 0, 0);
+    return g.getImageData(0, 0, bitmap.width, bitmap.height);
+  } finally { bitmap.close(); }
+}
+
+/** EXIF orientation, including mirrors, is a display step after stored-coordinate processing. */
+export function orientPreview(source: PreviewPixels, orientation: number): PreviewPixels {
+  const { width: w, height: h } = source;
+  const width = orientation >= 5 ? h : w, height = orientation >= 5 ? w : h;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = orientation === 2 || orientation === 3 ? w - 1 - x : orientation === 5 || orientation === 8 ? y : orientation === 6 || orientation === 7 ? h - 1 - y : x;
+    const dy = orientation === 3 || orientation === 4 ? h - 1 - y : orientation === 5 || orientation === 6 ? x : orientation === 7 || orientation === 8 ? w - 1 - x : y;
+    const s = (y * w + x) * 4, d = (dy * width + dx) * 4;
+    data.set(source.data.subarray(s, s + 4), d);
+  }
+  return { width, height, data };
+}

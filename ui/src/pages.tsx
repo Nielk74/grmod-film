@@ -1,14 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { color, EXTRA_NAME_MAX, filmpack, GR3X_RATIO_NAME_MAX, halateRgba, halationLight, MAX_EXTRA_SLOTS, SHUTDOWN_H, SHUTDOWN_NAME_MAX, SHUTDOWN_W } from '@grmod/core';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { color, EXTRA_NAME_MAX, filmpack, GR3X_FILM_IDS, GR3X_RATIO_NAME_MAX, halateRgba, halationLight, MAX_EXTRA_SLOTS, SHUTDOWN_H, SHUTDOWN_NAME_MAX, SHUTDOWN_W } from '@grmod/core';
 import type { SlotId } from '@grmod/core';
 import type { ReactNode } from 'react';
 import { DropZone, FileButton, Ico, IconCanvas, Menu, Prop, RatioIcon, RgbCanvas, Segmented, Select, Switch } from './components';
 import { FirmwareHero } from './firmware';
 import { t } from './i18n';
 import type { Key } from './i18n';
+import { APPROVED_GOLD_NAME, cie76Fit, isApprovedGoldIntent, supportsApprovedGold } from './approved-gold';
 import type { Crop } from './pixels';
 import { onUiScale, uiScale } from './fit';
-import { applySlot } from './preview';
+import { applySlot, createDetailRenderer, loupeScale } from './preview';
+import type { DetailResult } from './preview';
+import { captureComparisonCrop, comparisonCropContextReady, comparisonCropSaving, createComparisonCropOwner, createComparisonCropSaver, encodeComparisonCrop, subscribeComparisonCropSaving } from './comparison-crop';
+import { host, sha256Hex } from './host';
 import { LibraryDialog, RecipeSection, SampleStrip } from './library';
 import {
   addRatio, addWallFiles, askForOfficial, bridgeLoaded, loadFirmwareFile, loadIconImage, loadPresetFile, loadPreviewFile, moveWall, nameProblem, openCrop, outputFirmware, previewPhoto, removePreset, removeWall,
@@ -18,12 +22,21 @@ import {
   setMonoUnlock,
   setDirectFlash,
   extraName, extraNameProblem, extraProblem, halationOf, removeExtraSlot, setExtraCount, setExtraName, setHalation, slotOf,
-  filmCountChoosable, removeFilm, setFilmCount,
-  libraryLook, recipeOf, recipesAvailable, useWholeLibrary, addBuiltInPictures,
-  hasLookLayout, isGr3, KEEP_VISIBLE, lookHiddenNow, lookMonoOnly, lookName, lookOrderAvailable, lookOrderNow, moveLook, moveLookTo, resetLookLayout, setLookHidden,
+  filmCountChoosable, getState, removeFilm, setFilmCount, shownSlots,
+  libraryLook, recipeOf, recipesAvailable, useWholeLibrary, addBuiltInPictures, resolvedPresetResult, unavailableLibraryProblem,
+  hasLookLayout, isGr3, KEEP_VISIBLE, lookHiddenNow, lookIdentity, lookMonoOnly, lookName, lookOrderAvailable, lookOrderNow, moveLook, moveLookTo, resetLookLayout, setLookHidden,
   setWallName, wallMax, wallMenuProblem,
+  previewOriginal, setPreviewMain, setTextureGeometry,
 } from './store';
 import type { ExtraSlot, HaloColour, RatioItem, SlotKey, WallItem } from './store';
+import type { State } from './store';
+
+const cropParticipantReady = (s: State, mounted = true): boolean => {
+  const p = slotOf(s.activeSlot, s)?.preset;
+  return comparisonCropContextReady(s.ready, s.page, mounted) && host.available && supportsApprovedGold(s.info, s.model) && !!s.raw && recipesAvailable(s) && s.previewMode === 'photo' &&
+    s.previewMain && !!previewOriginal() && !s.busy && !s.fwBusy && shownSlots(s).some(x => x.id === s.activeSlot) &&
+    !!p && !p.busy && !p.error && !!resolvedPresetResult(s.activeSlot, s);
+};
 
 const isPreset = (f: File): boolean => /\.(xmp|cube)$/i.test(f.name);
 const isFirmware = (f: File): boolean => /\.bin$/i.test(f.name);
@@ -61,11 +74,93 @@ function PhotoCompare({ params }: { params?: color.SlotParams }) {
   const haloColour = useStore((s) => (s.info?.family === 'gr3x' && !filmCountChoosable(s) ? 'red' : halationOf(s.activeSlot, s).colour ?? 'red'));
   const halo = haloLevel ? { preview: haloLevel } : undefined;
   // where the slot's light starts: its own look decides how bright the highlights end up
-  const result = useStore((s) => slotOf(s.activeSlot, s)?.preset?.result);
+  const result = useStore((s) => resolvedPresetResult(s.activeSlot, s));
   const light = useMemo(() => (result ? halationLight(result.curves, result.postQ9) : undefined), [result]);
   const base = useMemo(() => (photo && params ? applySlot(params, photo, gr3x) : null), [photo, params, gr3x]);
   // GR III / IIIx films (round 10): the film's grain, as the camera's module computes it.
   const grain = useStore((s) => (recipesAvailable(s) && s.info?.family === 'gr3x' && !s.activeSlot.startsWith('x-') ? color.grainSetting(recipeOf(s.activeSlot as SlotId, s).grain) : 0));
+  const supported = useStore(recipesAvailable);
+  const slot = useStore(s => s.activeSlot);
+  const model = useStore(s => s.model);
+  const info = useStore(s => s.info);
+  const raw = useStore(s => s.raw);
+  const slotState = useStore(s => s.slots[s.activeSlot as SlotId]);
+  const mtf = useStore(s => recipesAvailable(s) && !s.activeSlot.startsWith('x-') && recipeOf(s.activeSlot as SlotId, s).filmMtf === true);
+  const policy = useStore(s => recipesAvailable(s) ? s.textureGeometry : undefined);
+  const main = useStore(s => s.previewMain);
+  const rev = useStore(s => s.photoRev);
+  const original = useMemo(() => previewOriginal(), [rev]);
+  const renderer = useMemo(() => createDetailRenderer(), []);
+  const referenceSupported = !!photo && !!params && !!raw && supported && supportsApprovedGold(info, model);
+  // Source/model/firmware or unsupported-scope round trips cannot revive a previous local choice.
+  const referenceOwner = useMemo(() => ({ rev, model, info, raw, referenceSupported }), [rev, model, info, raw, referenceSupported]);
+  const [reference, setReference] = useState<{ owner: typeof referenceOwner; value: 'source' | 'colour' }>();
+  const colourReference = referenceSupported && reference?.owner === referenceOwner && reference.value === 'colour';
+  const cropMode = useRef({ key: {}, colour: false });
+  cropMode.current.colour = colourReference;
+  const detailOptions = useMemo(() => original ? { filmMtf: mtf, policy, orientation: original.orientation, halo: haloLevel, light, colour: haloColour, grain, main: { width: original.width, height: original.height }, ...(colourReference ? { reference: 'colour' as const } : {}) } : undefined, [original, mtf, policy, haloLevel, light, haloColour, grain, colourReference]);
+  // The key includes actual object identities as well as slot/family: old pixels are never labelled as the new film.
+  const job = useMemo(() => ({ original, params, detailOptions, main, slot, model, slotState, info, raw }), [original, params, detailOptions, main, slot, model, slotState, info, raw]);
+  const [detail, setDetail] = useState<{ job: typeof job; result?: DetailResult; error?: boolean }>();
+  const wantsDetail = supported && (mtf || policy !== undefined);
+  useEffect(() => {
+    if (!wantsDetail || !main || !original || !detailOptions) { renderer.cancel(); return; }
+    let live = true;
+    setDetail({ job });
+    void renderer.render(original, params, detailOptions).then(result => { if (live) setDetail({ job, result }); }).catch(e => { if (live && e.name !== 'AbortError') setDetail({ job, error: true }); });
+    return () => { live = false; renderer.cancel(); };
+  }, [job, wantsDetail, renderer]);
+  const current = detail?.job === job ? detail : undefined;
+  const full = useMemo(() => current?.result ? { before: new ImageData(current.result.before.data, current.result.before.width, current.result.before.height), after: new ImageData(current.result.after.data, current.result.after.width, current.result.after.height) } : undefined, [current?.result]);
+  const cropReady = useRef<object | null>(null), cropMounted = useRef(true);
+  const readyKey = useMemo(() => current?.result && colourReference && main && wantsDetail ? {} : null, [current?.result, colourReference, main, wantsDetail]);
+  cropReady.current = readyKey;
+  // Read on store notifications AND immediately before dispatch. Keep only weak object IDs and primitive
+  // fields, never a previous State/raw/original/result; ordinary volume/toast updates stay current.
+  const readCropOwner = useMemo(() => {
+    const owner = createComparisonCropOwner();
+    return (): object => {
+      const s = getState();
+      return owner.sample([s.ready, s.page, s.photoRev, s.model, s.info, s.raw, previewOriginal(), s.activeSlot, s.slots[s.activeSlot as SlotId],
+        resolvedPresetResult(s.activeSlot, s), s.previewMain, s.textureGeometry, s.lang,
+        cropParticipantReady(s, cropMounted.current) && cropMode.current.colour, cropMode.current.key, cropReady.current]);
+    };
+  }, []);
+  const renderedCropOwner = useStore(readCropOwner);
+  useLayoutEffect(() => { cropMounted.current = true; return () => { cropMounted.current = false; cropReady.current = null; }; }, []);
+  const cropSaver = useMemo(() => createComparisonCropSaver({ encode: encodeComparisonCrop, sha256: sha256Hex,
+    pickDirectory: () => host.pickDirectory(t('pickFolder')), join: (root, name) => host.join(root, name), write: (path, bytes) => host.write(path, bytes) }), []);
+  const cropBusy = useSyncExternalStore(subscribeComparisonCropSaving, comparisonCropSaving);
+  const [cropNotice, setCropNotice] = useState('');
+  const canSaveCrop = !!readyKey && cropParticipantReady(getState());
+  const saveCrop = (): void => {
+    if (comparisonCropSaving() || !canSaveCrop || !current?.result || !original || !detailOptions || !cropParticipantReady(getState(), cropMounted.current)) return;
+    // The component may not have painted a just-published store change yet.
+    if (readCropOwner() !== renderedCropOwner) { setCropNotice(t('cropStale')); return; }
+    const state = getState(), owner = renderedCropOwner;
+    // Capture only two small crops and bounded strings synchronously; no full job enters the async saver.
+    try {
+      const p = slotOf(slot, state)?.preset, n = GR3X_FILM_IDS.indexOf(slot as SlotId), film = state.info!.slots.find(x => x.id === slot)!;
+      const source = isApprovedGoldIntent(p?.library) ? APPROVED_GOLD_NAME : libraryLook(p?.library)?.name ??
+        [t('preset'), p?.fileName.split(/[\\/]/).pop() || p?.result?.title].filter(Boolean).join(' · ');
+      const requested = lookIdentity(`g${64 + n}`, state) ?? [film.defaultName, source].filter(Boolean).join(' · ');
+      const name = original.blob instanceof File ? original.blob.name.split(/[\\/]/).pop() || t('cropAttached') : t('cropAttached');
+      const before = current.result.before, cw = Math.min(512, before.width), ch = Math.min(512, before.height);
+      const snapshot = captureComparisonCrop(before, current.result.after, { title: t('cropTitle'), left: t('referenceColour'), right: t('referenceTextured'), lines: [
+        t('cropSource', { name }), t('cropFilm', { name: requested }), t('cropAlias', { name: lookName(`g${64 + n}`, state) }),
+        t('cropDimensions', { w: original.width, h: original.height, o: original.orientation, dw: before.width, dh: before.height, x: Math.floor((before.width - cw) / 2), y: Math.floor((before.height - ch) / 2), cw, ch }),
+        t('cropGeometry', { sky: recipeOf(slot as SlotId, state).sky, policy: t(detailOptions.policy === 'sensor' ? 'textureSensor' : detailOptions.policy === 'output' ? 'textureOutput' : 'textureLegacy') }),
+        t('cropMtfGrain', { requested: t(detailOptions.filmMtf ? 'cropOn' : 'grainOff'), applied: t(current.result.mtfApplied ? 'cropOn' : 'grainOff'), grain: detailOptions.grain & 3 ? `${t((['grainOff', 'grainWeak', 'grainMedium', 'grainStrong'] as const)[detailOptions.grain & 3])} / ${t(detailOptions.grain & 4 ? 'grainLarge' : 'grainSmall')}` : t('grainOff') }),
+        t('cropHalo', { value: detailOptions.halo ? `${t((['haloOff', 'haloWeak', 'haloMedium', 'haloStrong'] as const)[detailOptions.halo])} / ${t(({ red: 'haloRed', gold: 'haloGold', orange: 'haloOrange', white: 'haloWhite' } as const)[detailOptions.colour])}` : t('haloOff') }),
+        t('cropSourceLimit'), t('cropNativeLimit'),
+      ] });
+      setCropNotice('');
+      void cropSaver.save(snapshot, owner, key => cropMounted.current && readCropOwner() === key).then(result => {
+        if (!cropMounted.current) return;
+        setCropNotice(result.kind === 'saved' ? t('cropSaved', { file: result.path.split(/[\\/]/).pop()! }) : result.kind === 'unverified' ? t('cropUnverified') : result.kind === 'stale' ? t('cropStale') : result.kind === 'prepare-failed' ? t('cropPrepareFailed') : '');
+      });
+    } catch { setCropNotice(t('cropPrepareFailed')); }
+  };
   // The added slot's halation at the level chosen for the preview, as the camera computes it; then the grain.
   const after = useMemo(() => {
     if (!base || (!halo && !grain)) return base;
@@ -76,7 +171,28 @@ function PhotoCompare({ params }: { params?: color.SlotParams }) {
     if (grain) color.grainRgb(out.data, out.width, out.height, grain, 4, out.width);
     return out;
   }, [base, haloLevel, light, haloColour, grain]);
-  return <Compare photo={photo} after={after} label={t('preset')} samples />;
+  const status = !wantsDetail ? 'detailProxy' : !original || !main ? 'detailNeedsOriginal' : current?.error ? 'detailError' : !current?.result ? 'detailBusy' : mtf && !current.result.mtfApplied ? 'detailExcluded' : 'detailReady';
+  const shownPhoto = colourReference ? wantsDetail ? full?.before ?? base : base : wantsDetail ? full?.before ?? photo : photo;
+  const shownAfter = colourReference ? wantsDetail ? full?.after ?? null : after : wantsDetail ? full?.after ?? base : after;
+  const waiting = colourReference && wantsDetail && !full;
+  return <div className="photo-preview">
+    {referenceSupported && <div className="chips" role="group" aria-label={t('previewReference')} title={t('referenceHint')} style={{ flex: 'none' }}>
+      <span className="small muted">{t('previewReference')}</span>
+      <Segmented value={colourReference ? 'colour' : 'source'} onChange={value => { cropMode.current = { key: {}, colour: value === 'colour' }; setReference({ owner: referenceOwner, value: value === 'colour' ? 'colour' : 'source' }); }}
+        options={[{ value: 'source', label: t('referenceSource') }, { value: 'colour', label: t('referenceColour') }]} />
+      {canSaveCrop && <button type="button" className="btn small" disabled={cropBusy} onClick={saveCrop} title={t('cropHint')}>{t(cropBusy ? 'cropSaving' : 'cropSave')}</button>}
+    </div>}
+    {cropNotice && <p className="small muted" role="status" style={{ flex: 'none', margin: '4px 0' }}>{cropNotice}</p>}
+    <div className="photo-frame"><Compare photo={shownPhoto} after={shownAfter} beforeLabel={colourReference ? t('referenceColour') : undefined} label={t(colourReference ? 'referenceTextured' : 'preset')} samples /></div>
+    {supported && <details className="preview-geometry"><summary>{t('geometryTitle')}<span className="small muted" role="status">{waiting ? `${t('referenceWaiting')} · ` : ''}{t(status)}</span></summary>
+      <div className="preview-geometry-body">
+        {canSaveCrop && <p>{t('cropHint')}</p>}
+        {referenceSupported && <p>{t('referenceHint')}</p>}
+        {original ? <><p>{t('detailDimensions', { w: original.width, h: original.height, o: original.orientation, pw: photo?.width ?? 0, ph: photo?.height ?? 0 })}</p><label className="preview-main"><input type="checkbox" checked={main} onChange={e => { cropMode.current.key = {}; setPreviewMain(e.target.checked); }} />{t('sourceMain')}</label>{main && <p>{t('detailMain', { w: original.width, h: original.height })}</p>}</> : <p>{t('detailNeedsOriginal')}</p>}
+        <p>{t(status)}</p>
+      </div>
+    </details>}
+  </div>;
 }
 
 function usePhoto(): ImageData | null {
@@ -85,7 +201,7 @@ function usePhoto(): ImageData | null {
 }
 
 /** `photo` on the left of a draggable divider, `after` (labelled `label`) on the right. */
-function Compare({ photo, after, label, samples }: { photo: ImageData | null; after: ImageData | null; label: string; samples?: boolean }) {
+function Compare({ photo, after, label, beforeLabel, samples }: { photo: ImageData | null; after: ImageData | null; label: string; beforeLabel?: string; samples?: boolean }) {
   const beforeRef = useRef<HTMLCanvasElement>(null);
   const afterRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -95,23 +211,31 @@ function Compare({ photo, after, label, samples }: { photo: ImageData | null; af
   const [zoom, setZoom] = useState(false);
   const [focus, setFocus] = useState({ x: 0.5, y: 0.5 });
   const [boxW, setBoxW] = useState(0);
+  const [dpr, setDpr] = useState(window.devicePixelRatio || 1);
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
+    // clientWidth is rounded and precedes the root's uniform scale; use actual displayed CSS pixels.
+    const measure = (): void => { setBoxW(el.getBoundingClientRect().width); setDpr(window.devicePixelRatio || 1); };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    const off = onUiScale(measure);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); off(); window.removeEventListener('resize', measure); };
   }, [photo]);
-  const k = zoom && photo && boxW ? Math.max(1, photo.width / (boxW * (window.devicePixelRatio || 1))) : 1;
-  const layer = { transform: k > 1 ? `scale(${k})` : undefined, transformOrigin: `${(focus.x * 100).toFixed(2)}% ${(focus.y * 100).toFixed(2)}%` };
-  useEffect(() => {
+  const k = zoom && photo ? loupeScale(photo.width, boxW, dpr) : 1;
+  const layer = { transform: zoom ? `scale(${k})` : undefined, transformOrigin: `${(focus.x * 100).toFixed(2)}% ${(focus.y * 100).toFixed(2)}%` };
+  useLayoutEffect(() => {
     const c = beforeRef.current;
-    if (!c || !photo) return;
+    if (!c) return;
+    if (!photo) { c.width = 0; c.height = 0; return; }
     c.width = photo.width; c.height = photo.height; c.getContext('2d')!.putImageData(photo, 0, 0);
   }, [photo]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const c = afterRef.current;
-    if (!c || !after) return;
+    if (!c) return;
+    if (!after) { c.width = 0; c.height = 0; return; }
     c.width = after.width; c.height = after.height; c.getContext('2d')!.putImageData(after, 0, 0);
   }, [after]);
   if (!photo) {
@@ -137,7 +261,7 @@ function Compare({ photo, after, label, samples }: { photo: ImageData | null; af
       <div className="compare-layer" style={after ? { clipPath: `inset(0 ${(100 - pos * 100).toFixed(2)}% 0 0)` } : undefined}><canvas ref={beforeRef} className={`compare-img ${zoom ? 'zoomed' : ''}`} style={layer} /></div>
       {after && (
         <>
-          <span className="compare-tag l" style={{ opacity: pos < 0.16 ? 0 : 1 }}>{t('original')}</span>
+          <span className="compare-tag l" style={{ opacity: pos < 0.16 ? 0 : 1 }}>{beforeLabel ?? t('original')}</span>
           <span className="compare-tag r" style={{ opacity: pos > 0.84 ? 0 : 1 }}>{label}</span>
           <div
             className="compare-line" style={{ left: pct }} role="slider" tabIndex={0} aria-label={t('compare')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pos * 100)}
@@ -168,7 +292,8 @@ function PreviewPane({ below, belowH = 0 }: { below?: ReactNode; belowH?: number
   const mode = useStore((s) => s.previewMode);
   const active = useStore((s) => s.activeSlot);
   // The film's colour with its recipe's teal sky (GR III / IIIx); a stable object per change.
-  const baseParams = useStore((s) => slotOf(s.activeSlot, s)?.preset?.result?.params);
+  const baseParams = useStore((s) => resolvedPresetResult(s.activeSlot, s)?.params);
+  const approvedUnavailable = useStore(s => isApprovedGoldIntent(slotOf(s.activeSlot, s)?.preset?.library) && !resolvedPresetResult(s.activeSlot, s));
   const sky = useStore((s) => (recipesAvailable(s) && !s.activeSlot.startsWith('x-') ? recipeOf(s.activeSlot as SlotId, s).sky : 0));
   const params = useMemo(() => (baseParams ? color.withTealSky(baseParams, sky) : undefined), [baseParams, sky]);
   const extras = useStore((s) => s.extras);
@@ -206,7 +331,7 @@ function PreviewPane({ below, belowH = 0 }: { below?: ReactNode; belowH?: number
         <Segmented tour="ic-mode" value={mode} onChange={setPreviewMode} options={[{ value: 'photo', label: t('previewPhoto') }, { value: 'swatch', label: t('previewSwatch') }]} />
       </div>
       <div className="pane-body" style={{ '--below': below ? `${belowH + 10}px` : '0px' } as React.CSSProperties}>
-        <div className="pane-fit" data-tour="ic-preview" data-tour-fit="">{mode === 'photo' ? <PhotoCompare params={params} /> : <Swatches params={params} />}</div>
+        <div className="pane-fit" data-tour="ic-preview" data-tour-fit="">{approvedUnavailable ? <p className="muted" role="status">{t('approvedGoldPreviewUnavailable')}</p> : mode === 'photo' ? <PhotoCompare params={params} /> : <Swatches params={params} />}</div>
         {below && <div className="pane-below">{below}</div>}
       </div>
     </DropZone>
@@ -231,6 +356,8 @@ function SlotCard({ id }: { id: SlotId }) {
   const recipes = useStore((s) => recipesAvailable(s));
   const [libraryOpen, setLibraryOpen] = useState(false);
   const look = libraryLook(p?.library);
+  const approved = isApprovedGoldIntent(p?.library);
+  const fit = cie76Fit(p?.result);
   return (
     <DropZone className={`card ${active ? 'on' : ''}`} tour={first ? 'ic-slot' : undefined} accept={isPreset} onFiles={(f) => { void loadPresetFile(id, f[0]); }}>
       <div className="card-in" onPointerDownCapture={() => setActiveSlot(id)} onFocusCapture={() => setActiveSlot(id)}>
@@ -257,15 +384,16 @@ function SlotCard({ id }: { id: SlotId }) {
               {p && (
                 <div className="film-pick-on">
                   <div className={`file-chip ${p.error ? 'bad' : ''}`}>
-                    <button className="file-main" title={t('libraryChoose')} onClick={() => setLibraryOpen(true)}>{look ? Ico.aperture : Ico.file}<span className="ellipsis">{look ? look.name : p.result?.title || p.fileName}</span></button>
+                    <button className="file-main" title={t('libraryChoose')} onClick={() => setLibraryOpen(true)}>{look || approved ? Ico.aperture : Ico.file}<span className="ellipsis">{approved ? APPROVED_GOLD_NAME : look ? look.name : p.result?.title || p.fileName}</span></button>
                     <button className="file-x" title={t('remove')} aria-label={t('remove')} onClick={() => removePreset(id)}>{Ico.x}</button>
                   </div>
                   {p.busy && <span className="spinner small" />}
                   {p.error && <span className="chip bad" title={p.error}><span className="ellipsis">{p.error}</span></span>}
-                  {p.result && !look && <span className="small muted">{t('gr3xFit', { mean: p.result.meanDE.toFixed(1), p95: p.result.p95DE.toFixed(1) })}</span>}
+                  {p.result && !look && <span className="small muted">{fit ? t('gr3xFit', { mean: fit.mean.toFixed(1), p95: fit.p95.toFixed(1) }) : t('approvedGoldMetricsUnavailable')}</span>}
                 </div>
               )}
               {look && <p className="film-about">{look.about}</p>}
+              {approved && <p className="film-about">{t('approvedGoldAbout')}</p>}
               <RecipeSection id={id} />
             </div>
           )}
@@ -278,7 +406,7 @@ function SlotCard({ id }: { id: SlotId }) {
                   <FileButton className="file-main" accept=".xmp,.cube" title={t('replace')} onFiles={(f) => { void loadPresetFile(id, f[0]); }}>{Ico.file}<span className="ellipsis">{p.result?.title || p.fileName}</span></FileButton>
                   <button className="file-x" title={t('remove')} aria-label={t('remove')} onClick={() => removePreset(id)}>{Ico.x}</button>
                 </div>
-                {gr3x && p.result && <p className="small muted">{t('gr3xFit', { mean: p.result.meanDE.toFixed(1), p95: p.result.p95DE.toFixed(1) })}{p.result.p95DE > 6 && <><br />{t('gr3xFitPoor')}</>}</p>}
+                {gr3x && p.result && <p className="small muted">{fit ? t('gr3xFit', { mean: fit.mean.toFixed(1), p95: fit.p95.toFixed(1) }) : t('approvedGoldMetricsUnavailable')}{fit && fit.p95 > 6 && <><br />{t('gr3xFitPoor')}</>}</p>}
                 {(p.busy || p.error) && (
                   <div className="chips">
                     {p.busy && <span className="chip muted"><span className="spinner small" />{t('converting')}</span>}
@@ -290,7 +418,7 @@ function SlotCard({ id }: { id: SlotId }) {
           </Prop>}
           <Prop label={t('icon')} tour={first ? 'ic-icon' : undefined}>
             <div className="chips">
-              <Segmented value={slot.icon.mode} onChange={(mode) => setIcon(id, mode === 'library' ? { mode, look: look?.name } : { mode })} options={[{ value: 'keep', label: t('iconKeep') }, ...(slot.icon.mode === 'library' || look ? [{ value: 'library' as const, label: t('library') }] : []), { value: 'text', label: t('iconText') }, { value: 'image', label: t('iconImage') }]} />
+              <Segmented value={slot.icon.mode} onChange={(mode) => setIcon(id, mode === 'library' ? { mode, look: approved ? p?.library : look?.name } : { mode })} options={[{ value: 'keep', label: t('iconKeep') }, ...(slot.icon.mode === 'library' || look ? [{ value: 'library' as const, label: t('library') }] : []), { value: 'text', label: t('iconText') }, { value: 'image', label: t('iconImage') }]} />
               {slot.icon.mode !== 'keep' && slot.icon.mode !== 'library' && <Segmented value={slot.icon.style} onChange={(style) => setIcon(id, { style })} options={[{ value: 'film', label: t('styleFilm') }, { value: 'plain', label: t('stylePlain') }]} />}
               {slot.icon.mode === 'text' && <input className="input short" value={slot.icon.text} maxLength={8} spellCheck={false} placeholder="400" aria-label={t('iconText')} onChange={(e) => setIcon(id, { text: e.target.value })} />}
               {slot.icon.mode === 'image' && <FileButton className="btn small" accept="image/*" onFiles={(f) => { void loadIconImage(id, f[0]); }}>{t('chooseImage')}</FileButton>}
@@ -306,6 +434,7 @@ function SlotCard({ id }: { id: SlotId }) {
 /** GR III / IIIx: how many films are added (0 to maxFilms), laid out as GR IV's added slots (ExtrasHead). */
 function FilmCountHead() {
   const n = useStore((s) => s.filmCount);
+  const policy = useStore(s => s.textureGeometry);
   const max = useStore((s) => s.info?.features.maxFilms ?? 9);
   const options = Array.from({ length: max + 1 }, (_, i) => ({ value: String(i), label: String(i) }));
   return (
@@ -319,6 +448,7 @@ function FilmCountHead() {
       </div>
       <div className="extras-count"><Select variant="box" value={String(n)} onChange={(v) => setFilmCount(Number(v))} options={options} label={t('extraTitle')} /></div>
       <button className="btn ghost small lib-all" onClick={() => useWholeLibrary()}>{Ico.aperture}<span>{t('libraryAll', { n: Math.min(max, filmpack.LOOKS.length) })}</span></button>
+      <div className="texture-policy"><span className="small muted">{t('textureScale')}</span><Select variant="box" value={policy ?? 'legacy'} onChange={v => setTextureGeometry(v === 'legacy' ? undefined : v as 'sensor' | 'output')} label={t('textureScale')} options={[{ value: 'legacy', label: t('textureLegacy') }, { value: 'sensor', label: t('textureSensor') }, { value: 'output', label: t('textureOutput') }]} /><span className="small muted">{t('textureHint')}</span></div>
     </div>
   );
 }
@@ -384,6 +514,9 @@ function LookOrderView() {
   // the order and the hidden keys of the open camera family (GR III keeps its own), as primitives too
   const nameList = useStore((s) => lookOrderNow(s).map((k) => `${k}\u0001${lookName(k, s)}`).join('\u0000'));
   const names = useMemo(() => new Map(nameList.split('\u0000').map((x) => x.split('\u0001') as [string, string])), [nameList]);
+  // Imported source titles are arbitrary text; JSON keeps the new metadata snapshot delimiter-safe.
+  const identityList = useStore((s) => JSON.stringify(lookOrderNow(s).map((k) => [k, lookIdentity(k, s) ?? ''])));
+  const identities = useMemo(() => new Map<string, string>(JSON.parse(identityList)), [identityList]);
   const orderList = useStore((s) => lookOrderNow(s).join(','));
   const hiddenList = useStore((s) => lookHiddenNow(s).join(','));
   const monoList = useStore((s) => lookOrderNow(s).filter((k) => lookMonoOnly(k, s)).join(','));
@@ -392,6 +525,8 @@ function LookOrderView() {
   const hidden = useMemo(() => new Set(hiddenList ? hiddenList.split(',') : []), [hiddenList]);
   const monoOnly = useMemo(() => new Set(monoList ? monoList.split(',') : []), [monoList]);
   const nameOf = (k: string): string => names.get(k) ?? lookName(k);
+  const identityOf = (k: string): string | undefined => identities.get(k) || undefined;
+  const labelOf = (k: string): string => identityOf(k) ? `${nameOf(k)} · ${identityOf(k)}` : nameOf(k);
 
   const listRef = useRef<HTMLOListElement>(null);
   const [lifted, setLifted] = useState<string | null>(null);
@@ -503,7 +638,7 @@ function LookOrderView() {
     document.documentElement.classList.remove('look-grabbing');
     const to = cancel ? d.from : d.to;
     setLifted(null);
-    if (to !== d.from) { moveLookTo(d.key, to); setSaid(t('lookOrderMoved', { name: nameOf(d.key), n: to + 1 })); }
+    if (to !== d.from) { moveLookTo(d.key, to); setSaid(t('lookOrderMoved', { name: labelOf(d.key), n: to + 1 })); }
   };
   const dropRef = useRef(drop); dropRef.current = drop;
   const beginRef = useRef(begin); beginRef.current = begin;
@@ -561,7 +696,7 @@ function LookOrderView() {
   const step = (k: string, i: number, delta: -1 | 1): void => {
     snapshot({ reveal: k });
     moveLook(k, delta);
-    setSaid(t('lookOrderMoved', { name: nameOf(k), n: i + delta + 1 }));
+    setSaid(t('lookOrderMoved', { name: labelOf(k), n: i + delta + 1 }));
   };
 
   return (
@@ -572,18 +707,24 @@ function LookOrderView() {
             const isHidden = hidden.has(k);
             const mono = monoOnly.has(k);
             const keep = KEEP_VISIBLE.includes(k);
+            const identity = identityOf(k);
             return (
               <li key={k} data-key={k} className={`look-slot ${lifted === k ? 'lifted' : ''}`} onPointerDown={(e) => onDown(e, k)}>
                 <div className={`look-row ${isHidden ? 'hidden' : ''} ${lifted === k ? 'lifted' : ''}`}>
                   <span className="look-grip" title={t('lookOrderDrag')} aria-hidden>{Ico.grip}</span>
-                  <span className="look-name">{nameOf(k)}{mono ? <em className="look-mono">{t('lookOrderMono')}</em> : null}</span>
+                  <span className="look-name" title={identity ? labelOf(k) : undefined}>
+                    {identity ? <>
+                      <span className="ellipsis" style={{ display: 'block', lineHeight: '16px' }}>{nameOf(k)}</span>
+                      <span className="muted small ellipsis" style={{ display: 'block', lineHeight: '14px' }}>{identity}</span>
+                    </> : <>{nameOf(k)}{mono ? <em className="look-mono">{t('lookOrderMono')}</em> : null}</>}
+                  </span>
                   {isHidden && <span className="look-tag">{t('lookOrderHiddenTag')}</span>}
                   <span className="look-btns">
-                    <button className="btn ghost icon-only" title={t('lookOrderUp')} aria-label={`${t('lookOrderUp')} · ${nameOf(k)}`} disabled={i === 0} onClick={() => step(k, i, -1)}>{Ico.up}</button>
-                    <button className="btn ghost icon-only" title={t('lookOrderDown')} aria-label={`${t('lookOrderDown')} · ${nameOf(k)}`} disabled={i === order.length - 1} onClick={() => step(k, i, 1)}>{Ico.down}</button>
+                    <button className="btn ghost icon-only" title={t('lookOrderUp')} aria-label={`${t('lookOrderUp')} · ${labelOf(k)}`} disabled={i === 0} onClick={() => step(k, i, -1)}>{Ico.up}</button>
+                    <button className="btn ghost icon-only" title={t('lookOrderDown')} aria-label={`${t('lookOrderDown')} · ${labelOf(k)}`} disabled={i === order.length - 1} onClick={() => step(k, i, 1)}>{Ico.down}</button>
                     <button
                       className={`btn ghost icon-only look-eye ${isHidden ? 'on' : ''}`} title={keep ? t(gr3 ? 'lookOrderKeepStandardGr3' : 'lookOrderKeepStandard') : isHidden ? t('lookOrderShow') : t('lookOrderHide')}
-                      aria-label={`${isHidden ? t('lookOrderShow') : t('lookOrderHide')} · ${nameOf(k)}`} aria-pressed={isHidden} disabled={keep} onClick={() => setLookHidden(k, !isHidden)}
+                      aria-label={`${isHidden ? t('lookOrderShow') : t('lookOrderHide')} · ${labelOf(k)}`} aria-pressed={isHidden} disabled={keep} onClick={() => setLookHidden(k, !isHidden)}
                     >{isHidden ? Ico.eyeOff : Ico.eye}</button>
                   </span>
                 </div>
@@ -907,6 +1048,7 @@ function IcViews({ view }: { view: IcView }) {
 }
 
 export function ImageControlPage() {
+  const approvedProblem = useStore(unavailableLibraryProblem);
   const info = useStore((s) => s.info);
   const fwName = useStore((s) => s.fwName);
   const model = useStore((s) => s.model);
@@ -936,6 +1078,7 @@ export function ImageControlPage() {
           </div>
         )}
       </header>
+      {approvedProblem && <p className="small" role="status">{approvedProblem}</p>}
       {!info && <FirmwareHero />}
       {views && (orderView ? <IcViews view={view} /> : <IcBody />)}
       {info && model === 'MONO' && <div className="mono-ic" data-tour-page="ic"><p className="muted">{t('monoNoSlots')}</p><FeatureSwitches mono /></div>}

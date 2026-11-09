@@ -38,6 +38,8 @@ import type { HalationLightR6 } from './halation-r6';
 import { GR3X_DATESTAMP_DIAG_R6_CODE, GR3X_HALATION_STATUS_R6_CODE } from './picture-modules-r6';
 import { GRAIN_CODE } from './grain-code';
 import { FILM_MTF_CODE } from './filmmtf-code';
+import { LEGACY_FILM_MTF_CODE, LEGACY_GRAIN_CODE } from '../picture-legacy-code';
+import type { TextureGeometryPolicy } from '../../color/texture-geometry';
 import { filmMtfMatrices } from '../../color/filmmtf';
 import { GRAIN_GAIN, GRAIN_MAGIC, grainTone } from '../../color/grain';
 import { GRAIN_COLOUR_TILES, GRAIN_LUMA_TILES } from '../../color/grain-tables';
@@ -82,6 +84,8 @@ export interface Gr3xJpegProgram {
   retarget?(address: number, replacement: number, reason: string): void;
 }
 export interface Gr3xJpegOptions {
+  /** Explicit WP2 native modules; absent keeps historical byte-exact payloads and contexts. */
+  textureGeometry?: TextureGeometryPolicy;
   /** Rounds up to 6, per film (looks 64..72): level 0 off, 1 weak, 2 strong, and the film's light
    * (0.8.0's halation, halation-r6.ts). */
   halation?: { levels: readonly number[]; light: readonly HalationLightR6[] };
@@ -111,6 +115,8 @@ const u16le = (v: readonly number[]) => { const b = new Uint8Array(v.length * 2)
 const addr = (r: string, a: number) => `movw ${r},#${a & 65535};movt ${r},#${a >>> 16};`;
 
 export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
+  if (o.textureGeometry !== undefined && !['sensor', 'output'].includes(o.textureGeometry)) throw new FirmwareError('bad-edit', 'IIIx texture geometry');
+  const geometryMode = o.textureGeometry === 'sensor' ? 1 : o.textureGeometry === 'output' ? 2 : 0;
   if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain && !o.filmMtf) return undefined;
   if (o.filmMtf && (!o.halation7 || o.filmMtf.films.length !== o.halation7.light.length || o.diagnostics))
     throw new FirmwareError('bad-edit', 'IIIx film MTF: round 10 films, a flag per film');
@@ -166,6 +172,7 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     const tiles = [...GRAIN_LUMA_TILES, ...GRAIN_COLOUR_TILES].map(t => p.append(t));
     const head = new Uint8Array(8), hv = new DataView(head.buffer);
     GRAIN_GAIN.forEach((v, i) => hv.setUint16(i * 2, v, true));
+    hv.setUint16(6, geometryMode, true);
     const context = (amount: number) => {
       const map = new Uint8Array(64);
       o.grain!.settings.forEach((v, k) => { map[GR3X_HALATION_FILM_STYLE + k] = v | amount; });
@@ -174,7 +181,7 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
         ...head, ...u32le([GRAIN_MAGIC]), ...map, ...u32le(tiles),
       ]));
     };
-    const code = () => p.append(Uint8Array.from(atob(GRAIN_CODE), c => c.charCodeAt(0)));
+    const code = () => p.append(Uint8Array.from(atob(geometryMode ? GRAIN_CODE : LEGACY_GRAIN_CODE), c => c.charCodeAt(0)));
     if (o.grain.camera) {
       // The stash's amount (bits 19..20) picks the context; 0: no grain.
       const contexts = [1, 2, 3].map(context), table = p.append(u32le([0, ...contexts])), module = code();
@@ -202,11 +209,11 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     const map = new Uint8Array(64);
     light.forEach((_, k) => { map[GR3X_HALATION_FILM_STYLE + k] = k + 1; });
     const context = (tables: number) => p.append(new Uint8Array([
-      ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, tables, entries, light.length, 0]),
+      ...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, tables, entries, light.length, geometryMode]),
       ...paramBytes(), ...u32le([HALATION_MAGIC_R7]), ...map,
     ]));
     const ctx = context(lut), goldCtx = goldLut ? context(goldLut) : 0, orangeCtx = orangeLut ? context(orangeLut) : 0;
-    const module = p.append(halationModule());
+    const module = p.append(halationModule(geometryMode !== 0));
     // Gold (stash bit 18), orange (bit 21): the context with that colour's tables.
     const pick = goldCtx ? `${addr('r2', GR3X_HALATION_STASH)}ldr r2,[r2];tst r2,#0x40000;movwne r0,#${goldCtx & 65535};movtne r0,#${goldCtx >>> 16};
       tst r2,#0x200000;movwne r0,#${orangeCtx & 65535};movtne r0,#${orangeCtx >>> 16};` : '';
@@ -222,7 +229,7 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     const mix = new Uint8Array(72), mv = new DataView(mix.buffer);
     filmMtfMatrices().forEach((v, i) => mv.setInt16(i * 2, v, true));
     const ctx = p.append(new Uint8Array([...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, HEAP_ALLOC, HEAP_FREE, GR3X_HALATION_STASH, FILM_MTF_MAGIC]), ...mix, ...map]));
-    const module = p.append(Uint8Array.from(atob(FILM_MTF_CODE), c => c.charCodeAt(0)));
+    const module = p.append(Uint8Array.from(atob(geometryMode ? FILM_MTF_CODE : LEGACY_FILM_MTF_CODE), c => c.charCodeAt(0)));
     const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}bl #${module};pop {r0-r3,ip,lr};${tail}`);
     entries.filmMtf = stub; entries.filmMtfModule = module; entries.filmMtfContext = ctx;
     tail = `b #${stub};`; first = stub;

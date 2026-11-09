@@ -58,7 +58,7 @@ struct ctx {
   const volatile u32 *stash;
   const u8 *tone;     /* 2 x 256: strength by brightness of small, large grain (128: as at mid grey) */
   u16 gain[3];        /* weak, medium, strong: the grain's luma RMS at mid grey, x 16 */
-  u16 pad;
+  u16 pad;            /* texture geometry: 0 legacy, 1 sensor, 2 output */
   u32 magic;          /* 'GRN2' */
   u8 look_map[64];    /* look -> amount | size << 2, 0: no grain */
   const s8 *luma[2];  /* 128 x 128 luma tiles of small, large grain (standard deviation 32) */
@@ -79,7 +79,7 @@ static int ram(const void *p) {
 static int picture_ok(const struct picture *p) {
   u32 w = p->width, h = p->height;
   if (p->format != 1 || !ram(p->y) || !ram(p->c) || w < 64 || h < 48 || p->stride < w || p->c_height < h) return 0;
-  return w <= 12000 && h <= 12000;
+  return w <= 12000 && h <= 12000 && !(w & 1);
 }
 
 /* n / d, by shift and subtract. */
@@ -103,7 +103,13 @@ static u32 offset(u32 i, u32 j, u32 seed) {
 
 static u8 clamp8(s32 v) { return (u8)(v < 0 ? 0 : v > 255 ? 255 : v); }
 
-static void grain_picture(const struct ctx *k, void *cache, const struct picture *p, u32 setting) {
+/* Twice the aspect span avoids fractional arithmetic for odd heights. */
+static u32 span2(const struct picture *p) {
+  u32 w = 2u * p->width, h = 3u * p->height;
+  return w > h ? w : h;
+}
+
+static void grain_picture(const struct ctx *k, void *cache, const struct picture *p, u32 setting, u32 reference2) {
   u32 w = p->width, h = p->height, amount = setting & 3, size = (setting >> 2) & 1;
   u32 step, att = 256, nbx, x, y, seed, a, b, ca, cb;
   s32 gain;
@@ -111,7 +117,7 @@ static void grain_picture(const struct ctx *k, void *cache, const struct picture
   const u8 *tone = k->tone + size * 256;
   const s8 *lt = k->luma[size], *ct = k->colour[size];
   /* Tile pixels per picture pixel, 8.8: 1 on the full-size picture, more on smaller ones. */
-  step = udiv(FULL_WIDTH << 8, w);
+  step = k->pad ? udiv(reference2 << 8, span2(p)) : udiv(FULL_WIDTH << 8, w);
   if (step > 256) att = udiv(65536u, step);
   gain = (s32)((k->gain[amount - 1] * att) >> 8);
   if (!gain || !ram(lt) || !ram(ct)) return;
@@ -150,7 +156,7 @@ static void grain_picture(const struct ctx *k, void *cache, const struct picture
 
 /* Entry: k = context, config = JpegEncodeMacroProcess configuration. */
 void grain(const struct ctx *k, u32 *config) {
-  u32 st = *k->stash, look, setting, i, j;
+  u32 st = *k->stash, look, setting, i, j, reference2 = 2u * FULL_WIDTH;
   struct picture *seen[4];
   void *cache;
   if (!(st & STASH_VALID) || !ram(config) || !ram(k->tone) || k->magic != MAGIC) return;
@@ -158,6 +164,11 @@ void grain(const struct ctx *k, u32 *config) {
   if (look >= 64) return;
   setting = k->look_map[look];
   if (!(setting & 3)) return;
+  /* Resolve only the primary main descriptor, before enumeration or alias deduplication. */
+  if (k->pad == 1) {
+    const struct picture *main = (const struct picture *)config[0x3c >> 2];
+    if (ram(main) && picture_ok(main) && (main->width >= 1280 || main->height >= 1280)) reference2 = span2(main);
+  }
   cache = k->cache();
   /* One picture per buffer (another entry with the same planes describes the whole sensor). */
   for (i = 0; i < 4; i++) {
@@ -167,5 +178,5 @@ void grain(const struct ctx *k, u32 *config) {
     for (j = 0; j < i; j++) if (seen[j] && seen[j]->y == p->y) break;
     if (j == i) seen[i] = p;
   }
-  for (i = 0; i < 4; i++) if (seen[i]) grain_picture(k, cache, seen[i], setting);
+  for (i = 0; i < 4; i++) if (seen[i]) grain_picture(k, cache, seen[i], setting, reference2);
 }

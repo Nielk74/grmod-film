@@ -4,9 +4,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { FILM_MTF_GAINS, FILM_MTF_MARGIN, FILM_MTF_STRIP, filmMtf, filmMtfApplies, filmMtfMatrices } from '../src/color/filmmtf';
+import { FILM_MTF_GAINS, FILM_MTF_MARGIN, FILM_MTF_STRIP, filmMtf, filmMtfApplies, filmMtfMatrices, filmMtfPreviewApplies, filmMtfRgba, rgbToYcc422 } from '../src/color/filmmtf';
 import type { Ycc422 } from '../src/color/filmmtf';
 import { FILM_MTF_CODE, FILM_MTF_CODE_LENGTH, FILM_MTF_SOURCE_SHA256 } from '../src/fw/gr3x/filmmtf-code';
+import { LEGACY_FILM_MTF_CODE, LEGACY_GRAIN_CODE, LEGACY_HALATION_CODE } from '../src/fw/picture-legacy-code';
 import { GR3X_HALATION_FILM_STYLE, installGr3xJpegStage } from '../src/fw/gr3x/jpeg-stage';
 import type { Gr3xJpegProgram } from '../src/fw/gr3x/jpeg-stage';
 
@@ -77,7 +78,7 @@ describe('film MTF: the reference', () => {
     expect(filmMtfApplies(720, 480)).toBe(false);
     expect(filmMtfApplies(160, 120)).toBe(false);
     expect(filmMtfApplies(6001, 4000)).toBe(false);
-    expect(filmMtfApplies(6000, 4004)).toBe(false);
+    expect(filmMtfApplies(6000, 4004)).toBe(true);
     const p = picture(720, 480), y = Uint8Array.from(p.y);
     expect(filmMtf(p)).toBe(false);
     expect(Buffer.from(p.y).equals(Buffer.from(y))).toBe(true);
@@ -85,6 +86,21 @@ describe('film MTF: the reference', () => {
 });
 
 describe('film MTF: the ARM module and its place in the JPEG stage', () => {
+  it('accepts crop mains through the surveyed 960 floor and processes only their aligned interior', () => {
+    for (const [w, h] of [[3360, 2240], [3000, 4000], [5332, 4000], [4800, 2700], [960, 1280]]) expect(filmMtfApplies(w, h)).toBe(true);
+    for (const [w, h] of [[720, 480], [160, 120], [640, 1280], [5333, 4000]]) expect(filmMtfApplies(w, h)).toBe(false);
+    const w = 964, h = 404, stride = 980, original = picture(stride, h);
+    const full = { ...original, y: original.y.slice(), c: original.c.slice(), width: w, stride };
+    const aligned = { ...original, y: original.y.slice(), c: original.c.slice(), width: w & ~7, height: h & ~7, stride };
+    expect(filmMtf(full)).toBe(true);
+    expect(filmMtf(aligned)).toBe(true);
+    expect(full.y).toEqual(aligned.y); expect(full.c).toEqual(aligned.c);
+    for (let r = 0; r < h; r++) for (let x = 0; x < stride; x++) if (r >= (h & ~7) || x >= (w & ~7)) {
+      expect(full.y[r * stride + x]).toBe(original.y[r * stride + x]);
+      expect(full.c[r * stride + x]).toBe(original.c[r * stride + x]);
+    }
+    expect(full.width).toBe(w); expect(full.height).toBe(h); expect(full.stride).toBe(stride);
+  });
   it('is the module built from tools/filmmtf/filmmtf.c (run tools/filmmtf/gen.py after a change)', () => {
     const src = readFileSync(new URL('../../tools/filmmtf/filmmtf.c', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
     expect(createHash('sha256').update(src).digest('hex')).toBe(FILM_MTF_SOURCE_SHA256);
@@ -110,7 +126,7 @@ describe('film MTF: the ARM module and its place in the JPEG stage', () => {
     const { p, blobs, stubs } = program();
     const films = Array.from({ length: 20 }, (_, k) => k === 11);
     const light = Array.from({ length: 20 }, () => ({ threshold: 0, escale: 1, table: new Uint16Array(256) }));
-    const entries = installGr3xJpegStage(p, { halation7: { light }, grain: { settings: films.map(() => 0), camera: true }, filmMtf: { films } })!;
+    const entries = installGr3xJpegStage(p, { halation7: { light }, grain: { settings: films.map(() => 0), camera: true }, filmMtf: { films }, textureGeometry: 'sensor' })!;
     expect(entries.filmMtf).toBeDefined();
     expect(entries.halation).toBeDefined();
     const mtfStub = stubs.find(s => s.at === entries.filmMtf)!;
@@ -131,5 +147,88 @@ describe('film MTF: the ARM module and its place in the JPEG stage', () => {
     const light = Array.from({ length: 4 }, () => ({ threshold: 0, escale: 1, table: new Uint16Array(256) }));
     expect(() => installGr3xJpegStage(program().p, { filmMtf: { films: [true, false, false, false] } })).toThrow();
     expect(() => installGr3xJpegStage(program().p, { halation7: { light }, filmMtf: { films: [true] } })).toThrow();
+  });
+
+  it('selects frozen legacy payloads by default and reuses context padding for each explicit geometry mode', () => {
+    for (const textureGeometry of [undefined, 'sensor', 'output'] as const) {
+      const { p, blobs } = program();
+      const mode = textureGeometry === 'sensor' ? 1 : textureGeometry === 'output' ? 2 : 0;
+      installGr3xJpegStage(p, { textureGeometry, halation7: { light: [{ table: new Uint16Array(256) }] }, grain: { settings: [2] }, filmMtf: { films: [true] } });
+      const grain = blobs.find(b => b.length === 120 && new DataView(b.buffer, b.byteOffset).getUint32(36, true) === 0x324e5247)!;
+      const halo = blobs.find(b => b.length === 124 && new DataView(b.buffer, b.byteOffset).getUint32(56, true) === 0x344c4148)!;
+      expect(grain).toBeDefined(); expect(halo).toBeDefined();
+      expect(new DataView(grain.buffer, grain.byteOffset).getUint16(34, true)).toBe(mode);
+      expect(new DataView(halo.buffer, halo.byteOffset).getUint32(36, true)).toBe(mode);
+      if (!mode) for (const code of [LEGACY_FILM_MTF_CODE, LEGACY_GRAIN_CODE, LEGACY_HALATION_CODE]) expect(blobs.some(b => Buffer.from(b).toString('base64') === code)).toBe(true);
+    }
+  });
+});
+
+describe('film MTF: desktop RGBA preview', () => {
+  function rgba(w: number, h: number): Uint8ClampedArray {
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      out[i] = 70 + ((x >> 4) & 1) * 55;
+      out[i + 1] = 60 + ((x >> 3) & 1) * 60 + y % 13;
+      out[i + 2] = 80 + ((x + y) % 23) * 3;
+      out[i + 3] = (x * 3 + y) % 256;
+    }
+    return out;
+  }
+
+  it('matches eligibility to the selected legacy or crop-capable payload, never the display size', () => {
+    for (const [w, h] of [[6000, 4000], [4800, 3200], [4096, 64]]) expect(filmMtfPreviewApplies(w, h)).toBe(true);
+    for (const [w, h] of [[3360, 2240], [5332, 4000], [4800, 2700], [3000, 4000], [720, 480]]) expect(filmMtfPreviewApplies(w, h)).toBe(false);
+    for (const policy of ['sensor', 'output'] as const) {
+      for (const [w, h] of [[3360, 2240], [5332, 4000], [4800, 2700], [3000, 4000], [960, 1280]]) expect(filmMtfPreviewApplies(w, h, policy)).toBe(true);
+      for (const [w, h] of [[640, 1280], [720, 480], [5333, 4000], [960, 63], [12002, 1280], [960.5, 1280]]) expect(filmMtfPreviewApplies(w, h, policy)).toBe(false);
+    }
+    expect(filmMtfPreviewApplies(6000, 4000, 'invalid' as any)).toBe(false);
+  });
+
+  it('applies the established YCbCr filter delta while preserving alpha, exterior bytes and aligned tails', () => {
+    const w = 964, h = 68, source = rgba(w, h), rgb = new Uint8Array(w * h * 3);
+    for (let k = 0; k < w * h; k++) rgb.set(source.subarray(k * 4, k * 4 + 3), k * 3);
+    const oracle = rgbToYcc422(rgb, w, h), beforeY = oracle.y.slice(), beforeC = oracle.c.slice();
+    expect(filmMtf(oracle)).toBe(true);
+    const expected = source.slice();
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const at = y * w + x, pair = y * w + (x & ~1), i = at * 4;
+      const dy = oracle.y[at] - beforeY[at], cb = oracle.c[pair] - beforeC[pair], cr = oracle.c[pair + 1] - beforeC[pair + 1];
+      expected[i] += dy + 1.402 * cr;
+      expected[i + 1] += dy - 0.344136 * cb - 0.714136 * cr;
+      expected[i + 2] += dy + 1.772 * cb;
+    }
+    const backing = new Uint8ClampedArray(source.length + 48).fill(173), outside = backing.slice();
+    const view = new Uint8ClampedArray(backing.buffer, 16, source.length); view.set(source);
+    expect(filmMtfRgba(view, w, h, 'sensor')).toBe(true);
+    expect(view).toEqual(expected);
+    expect(view.some((v, i) => i % 4 !== 3 && v !== source[i])).toBe(true);
+    expect(backing.subarray(0, 16)).toEqual(outside.subarray(0, 16));
+    expect(backing.subarray(16 + source.length)).toEqual(outside.subarray(16 + source.length));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      expect(view[i + 3]).toBe(source[i + 3]);
+      if (x >= (w & ~7) || y >= (h & ~7)) expect(view.subarray(i, i + 4)).toEqual(source.subarray(i, i + 4));
+    }
+    const alternate = source.slice(); expect(filmMtfRgba(alternate, w, h, 'output')).toBe(true); expect(alternate).toEqual(view);
+  });
+
+  it('does not replace unchanged full-resolution source chroma with a lossy 4:2:2 round trip', () => {
+    const w = 960, h = 64, source = new Uint8ClampedArray(w * h * 4);
+    // Pair-average RGB is neutral128; rounded Y is128 for both pixels. The native planes are flat,
+    // while the original RGB contains real per-pixel colour that a replacement round trip loses.
+    for (let k = 0; k < w * h; k++) source.set(k & 1 ? [76, 151, 145, k & 255] : [180, 105, 111, k & 255], k * 4);
+    const actual = source.slice(); expect(filmMtfRgba(actual, w, h, 'sensor')).toBe(true); expect(actual).toEqual(source);
+  });
+
+  it('leaves unsupported legacy sizes, malformed buffers and invalid policy values byte-identical', () => {
+    const source = rgba(960, 64);
+    for (const [w, h, policy] of [[960, 64, undefined], [959, 64, 'sensor'], [960, 63, 'sensor'], [960, 64, 'invalid']] as const) {
+      const actual = source.slice(); expect(filmMtfRgba(actual, w, h, policy as any)).toBe(false); expect(actual).toEqual(source);
+    }
+    const short = source.slice(1), before = short.slice();
+    expect(filmMtfRgba(short, 960, 64, 'sensor')).toBe(false); expect(short).toEqual(before);
   });
 });

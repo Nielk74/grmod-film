@@ -1,23 +1,27 @@
 import { useSyncExternalStore } from 'react';
 import { FACTORY_LOOK_IDS, card, filmpack, GR3X_FILM_IDS, GR3X_MAX_CUSTOM_RATIOS, GR3X_T4_CUSTOM, LANGS, MAX_CUSTOM_RATIOS, MAX_EXTRA_SLOTS, SHUTDOWN_MAX_PICTURES, SHUTDOWN_NAME_MAX, validateExtraSlotName, validateGr3xRatioName, validateRatioName, validateShutdownName } from '@grmod/core';
-import type { CameraModel, ClarityChange, ExtraSlotSpec, FirmwareInfo, Gr3xFilmDefaults, Grain, FirmwareSummary, LangCode, LookLayout, PresetResult, RatioPreview, RatioSpec, ShutdownPictureSpec, SlotId, SlotRequest, SoftFocusRequest, SoftFocusStrength } from '@grmod/core';
+import type { CameraModel, ClarityChange, ExtraSlotSpec, FirmwareInfo, Gr3xFilmDefaults, Grain, FirmwareSummary, LangCode, LookLayout, RatioPreview, RatioSpec, ShutdownPictureSpec, SlotId, SlotRequest, SoftFocusRequest, SoftFocusStrength } from '@grmod/core';
 import { engine, EngineError } from './engine';
 import { host, HostError, sha256Hex } from './host';
+import { encodeBuildReceipt, snapshotBuildArguments, supportsBuildReceipt } from './build-receipt';
+import type { BuildArguments, ReceiptSource } from './build-receipt';
 import type { ParkedEntry, Volume } from './host';
 import { t } from './i18n';
 import type { Key } from './i18n';
-import { cropToRgb, defaultCrop, ensureIconFont, imageIcon, loadBitmap, textIcon, workingCopy } from './pixels';
-import type { Crop } from './pixels';
+import { cropToRgb, defaultCrop, ensureIconFont, imageIcon, loadBitmap, previewJpeg, textIcon, workingCopy } from './pixels';
+import type { Crop, PreviewOriginal } from './pixels';
 import { decodePreview } from './preview';
 import defaultPhotoUrl from './assets/preview.jpg';
 import { SAMPLES } from './samples';
+import { APPROVED_GOLD_ID, APPROVED_GOLD_NAME, createApprovedGold, isApprovedGoldIntent, matchesApprovedGold, supportsApprovedGold } from './approved-gold';
+import type { UiPresetResult } from './approved-gold';
 import { END_SCREENS } from './endscreens';
 
 export type Page = 'ic' | 'ratio' | 'wall' | 'copies';
 /** One added aspect ratio as typed; `preview` is what the camera would make of it (absent while that is worked out). */
 export interface RatioItem { id: string; ratio: string; name: string; preview?: RatioPreview }
 /** `library`: a film of GR Mod's library (its name); its .cube is made from the library, not kept. */
-export interface PresetState { fileName: string; kind: 'xmp' | 'cube'; text: string; busy: boolean; result?: PresetResult; error?: string; library?: string }
+export interface PresetState { fileName: string; kind: 'xmp' | 'cube'; text: string; busy: boolean; result?: UiPresetResult; error?: string; library?: string }
 /** `library`: the icon of a film of GR Mod's library (`look` its name). */
 export interface IconState { mode: 'keep' | 'text' | 'image' | 'library'; text: string; style: 'film' | 'plain'; image?: string; pixels?: Uint8Array; look?: string }
 /**
@@ -26,7 +30,7 @@ export interface IconState { mode: 'keep' | 'text' | 'image' | 'library'; text: 
  * `sky`: skies toward teal (+) or blue (-), -4..+4: in the camera the film's Hue row (its teal sky,
  * BuildOptions.tealHue), which starts there; the preview composes it into the film (color/sky.ts).
  */
-export interface RecipeState { sharpness: number; clarity: number; shading: number; grain: Grain; sky: number }
+export interface RecipeState { sharpness: number; clarity: number; shading: number; grain: Grain; sky: number; filmMtf?: true }
 export const NEUTRAL_RECIPE: RecipeState = { sharpness: 0, clarity: 0, shading: 0, grain: { amount: 0, size: 'small' }, sky: 0 };
 /** `halation`: Cinema Yellow / Green with a preset (0.8.2); their Toning becomes the Halation slider. */
 export interface SlotState { preset?: PresetState; names: Partial<Record<LangCode, string>>; icon: IconState; halation?: HalationState; recipe?: RecipeState }
@@ -82,6 +86,9 @@ export interface State {
   /** GR IV, experimental: .cube presets of added slots get hue sectors of their own (core color/hue.ts). */
   /** GR III / IIIx: how many films the build has (1..info.features.maxFilms). */
   filmCount: number;
+  textureGeometry?: 'sensor' | 'output';
+  /** Session-only declaration that the attached JPEG is the camera's main raster, without resizing. */
+  previewMain: boolean;
   previewMode: PreviewMode; photoRev: number; activeSlot: SlotKey;
   /** The preview's photograph: one of the samples (samples.ts), or `own` (the user's, or the program's `preview.jpg`). */
   sample: string;
@@ -114,7 +121,7 @@ const availableSlots = (s: State = state): SlotId[] => s.info ? shownSlots(s).ma
 const emptySlot = (): SlotState => ({ names: {}, icon: { mode: 'keep', text: '', style: 'film' } });
 const emptySlots = (): Record<SlotId, SlotState> => Object.fromEntries(SLOT_IDS.map(id => [id, emptySlot()])) as Record<SlotId, SlotState>;
 let state: State = {
-  ready: false, page: 'ic', fwBusy: false, model: 'HDF', lang: 'zh-CN',
+  ready: false, page: 'ic', fwBusy: false, model: 'HDF', lang: 'zh-CN', previewMain: false,
   slots: emptySlots(), extras: [], lookOrder: [], lookHidden: [], lookOrder3: [], lookHidden3: [], wall: [], ratios: [], ratioBackdrop: 'photo', soft: false, dateStamp: false, monoUnlock: false, directFlash: false, filmCount: 0, previewMode: 'photo', photoRev: 0, sample: SAMPLES[0].id, activeSlot: 'CY', volumes: [], bridgeOpen: false,
   copySource: 'card', parked: [], backups: [], copySel: [], copyInfo: {}, builds: [], showAll: false, toasts: [], onlineOpen: false, toursSeen: [],
 };
@@ -213,6 +220,8 @@ let gr3Legacy = false;
 let familyGen = 0;
 /** True while the open family's files are being read: a save meanwhile writes its work as loaded. */
 let familyLoading = false;
+/** Explicit slot edits supersede saved metadata while a family is still loading. */
+const presetEdits = new Set<SlotKey>();
 
 function familyData(s: State): FamilyDoc {
   return {
@@ -228,17 +237,20 @@ function familyData(s: State): FamilyDoc {
     wall: s.wall.map((w) => ({ id: w.id, name: w.name, kind: 'image', width: w.width, height: w.height, crop: w.crop, ...(w.menuName !== undefined ? { menuName: w.menuName } : {}), ...(w.menuId ? { menuId: w.menuId } : {}) })),
     ratios: s.ratios.map((r) => ({ id: r.id, ratio: r.ratio, name: r.name })),
     soft: s.soft, dateStamp: s.dateStamp, monoUnlock: s.monoUnlock, directFlash: s.directFlash, filmCount: s.filmCount, sample: s.sample,
+    ...(isGr3(s.model) && s.textureGeometry ? { textureGeometry: s.textureGeometry } : {}),
   };
 }
 
 /** The part of a family's saved work that needs no file: everything but presets and pictures. */
 function parseFamily(doc: FamilyDoc | null): Partial<State> {
+  presetEdits.clear();
   const slots = emptySlots();
   for (const id of SLOT_IDS) {
     const d = doc?.slots?.[id];
     if (!d) continue;
     slots[id].names = d.names || {};
-    if (d.icon) slots[id].icon = { mode: d.icon.mode || 'keep', text: d.icon.text || '', style: d.icon.style || 'film', image: d.icon.image, ...(d.icon.mode === 'library' && libraryLook(d.icon.look) ? { look: d.icon.look } : {}) };
+    if (isApprovedGoldIntent(d.preset?.library)) slots[id].preset = approvedPreset(d.preset.library, false);
+    if (d.icon) slots[id].icon = { mode: d.icon.mode || 'keep', text: d.icon.text || '', style: d.icon.style || 'film', image: d.icon.image, ...(d.icon.mode === 'library' && libraryIconLook(d.icon.look) ? { look: d.icon.look } : {}) };
     if (slots[id].icon.mode === 'library' && !slots[id].icon.look) slots[id].icon.mode = 'keep';
     const r = validRecipe(d.recipe);
     if (r) slots[id].recipe = r;
@@ -254,6 +266,7 @@ function parseFamily(doc: FamilyDoc | null): Partial<State> {
     .map((r: RatioItem) => ({ id: r.id, ratio: r.ratio.slice(0, 24), name: String(r.name || '').slice(0, 80) }));
   return {
     slots, extras, activeSlot: 'CY', wall: [], ratios, activeRatio: ratios[0]?.id,
+    textureGeometry: doc?.textureGeometry === 'sensor' || doc?.textureGeometry === 'output' ? doc.textureGeometry : undefined,
     lookOrder: normalizeLookOrder(Array.isArray(doc?.lookOrder) ? doc!.lookOrder : [], extras),
     lookHidden: normalizeLookHidden(Array.isArray(doc?.lookHidden) ? doc!.lookHidden : [], extras),
     lookOrder3: gr3SavedKeys(doc?.lookOrder3), lookHidden3: gr3SavedKeys(doc?.lookHidden3).filter((k) => k !== 'g11'),
@@ -277,15 +290,19 @@ async function loadFamilyFiles(doc: FamilyDoc | null, fam: Family, gen: number):
     }
     return bytes;
   };
+  const runs = new Map(presetRuns);
   for (const id of SLOT_IDS) {
+    const run = runs.get(id);
+    const current = (): boolean => gen === familyGen && presetRuns.get(id) === run && !presetEdits.has(id);
     const p = doc.slots?.[id]?.preset;
-    if (!p) continue;
+    if (!p || !current()) continue;
+    if (isApprovedGoldIntent(p.library)) { installApproved(id, p.library); continue; }
     // A film of the library: its .cube is made again (nothing is kept for it).
     const look = libraryLook(p.library);
     if (look) { void runPreset(id, p.fileName, 'cube', filmpack.cubeText(look), look.name); continue; }
     const text = await read(presetKey(id, fam));
     if (gen !== familyGen) return;
-    if (text) void runPreset(id, p.fileName, p.kind, new TextDecoder().decode(text));
+    if (text && current()) void runPreset(id, p.fileName, p.kind, new TextDecoder().decode(text));
   }
   for (const x of state.extras) {
     const p = (Array.isArray(doc.extras) ? doc.extras as { key: string; preset?: { fileName: string; kind: 'xmp' | 'cube' } | null }[] : []).find((d) => d.key === x.key)?.preset;
@@ -311,13 +328,14 @@ async function loadFamilyFiles(doc: FamilyDoc | null, fam: Family, gen: number):
 function currentFamilyDoc(): FamilyDoc {
   const data = familyData(state), doc = familyDocs[familyOf(state.model)];
   if (!familyLoading || !doc) return data;
-  for (const id of SLOT_IDS) if (!data.slots[id].preset && doc.slots?.[id]?.preset) data.slots[id].preset = doc.slots[id].preset;
+  for (const id of SLOT_IDS) if (!data.slots[id].preset && doc.slots?.[id]?.preset && !isApprovedGoldIntent(doc.slots[id].preset.library) && !presetEdits.has(id)) data.slots[id].preset = doc.slots[id].preset;
   for (const x of data.extras) if (!x.preset) x.preset = (Array.isArray(doc.extras) ? doc.extras : []).find((d: { key: string }) => d.key === x.key)?.preset ?? null;
   data.wall = Array.isArray(doc.wall) ? doc.wall : [];
   return data;
 }
 /** Before the open camera changes family: its work is kept (and saved with the next save). */
 function leaveFamily(): void {
+  ++photoGeneration; originalPhoto = null; set(s => ({ previewMain: false, photoRev: s.photoRev + 1 }));
   familyDocs[familyOf(state.model)] = currentFamilyDoc();
   familyLoading = false;
   ++familyGen;
@@ -441,7 +459,8 @@ export function setModel(model: CameraModel): void {
   set({ model, ...(isGr3(model) ? { bridgeOpen: false, bridgeAfter: undefined } : {}) });
   // The other camera's work comes back (its pictures are encoded again once read).
   if (differentFamily) enterFamily(familyOf(model));
-  else for (const w of state.wall) void encodeWall(w.id);
+  reconcileApprovedGold();
+  if (!differentFamily) for (const w of state.wall) void encodeWall(w.id);
   scheduleSave();
   // That camera's official file, when it was downloaded or opened before, opens again.
   if (otherFile || !state.info) void reopenKept(model);
@@ -479,12 +498,13 @@ async function openFirmware(raw: Uint8Array, name: string, persist: boolean): Pr
     if (!sameFamily) enterFamily(familyOf(model));
     if (info.family === 'gr3x') set((s) => ({ dateStamp: s.dateStamp && info.features.dateStamp, monoUnlock: s.monoUnlock && info.features.monoUnlock }));
     if (info.family === 'gr3x') ratiosChanged(true);
+    reconcileApprovedGold();
     if (info.bridge && persist) toast(t('bridgeOpened'), 'info');
     if (persist) { await host.storeSet(fwKey(fwGroupOf(model)), raw); scheduleSave(); }
     for (const id of info.capabilities.presets ? allSlotKeys() : []) {
       void renderIcon(id);
       const p = slotOf(id)?.preset;
-      if (p && !p.result && !p.busy) void runPreset(id, p.fileName, p.kind, p.text);
+      if (p && !isApprovedGoldIntent(p.library) && !p.result && !p.busy) void runPreset(id, p.fileName, p.kind, p.text);
     }
     // Encoded again for every firmware: GR IV and GR III store the pictures differently (4:2:2 / 4:2:0).
     if (info.capabilities.wallpaper || info.capabilities.menuPictures) for (const w of state.wall) void encodeWall(w.id);
@@ -492,6 +512,7 @@ async function openFirmware(raw: Uint8Array, name: string, persist: boolean): Pr
     return true;
   } catch (e) {
     set({ fwBusy: false, info: undefined, raw: undefined, fwName: undefined });
+    reconcileApprovedGold();
     scheduleSave();
     if (e instanceof EngineError && (e.code === 'unsupported-firmware' || e.code.startsWith('bad-') || e.code === 'too-short')) toast(t('badFirmware'), 'error');
     else fail(e);
@@ -533,6 +554,7 @@ const presetRuns = new Map<SlotKey, number>();
 let presetRun = 0;
 async function runPreset(id: SlotKey, fileName: string, kind: 'xmp' | 'cube', text: string, library?: string): Promise<void> {
   const lib = library ? { library } : {};
+  if (!isApprovedGoldIntent(library)) clearApprovedNames(id);
   patchSlot(id, { preset: { fileName, kind, text, busy: !!state.info?.capabilities.presets, ...lib } });
   if (!state.info?.capabilities.presets) return;
   const run = ++presetRun;
@@ -555,25 +577,107 @@ async function runPreset(id: SlotKey, fileName: string, kind: 'xmp' | 'cube', te
 export function libraryLook(name: unknown): filmpack.Look | undefined {
   return typeof name === 'string' ? filmpack.LOOKS.find((l) => l.name === name) : undefined;
 }
+/** Icon metadata only; this never invokes authored Gold's colour operation. */
+export function libraryIconLook(identity: unknown): filmpack.Look | undefined {
+  return isApprovedGoldIntent(identity) ? libraryLook('Gold 200') : libraryLook(identity);
+}
+function approvedPreset(identity: string, resolve: boolean): PresetState {
+  let result: UiPresetResult | undefined;
+  if (resolve && identity === APPROVED_GOLD_ID) {
+    try { const candidate = createApprovedGold(state.info, state.model); if (matchesApprovedGold(candidate)) result = candidate; } catch { /* retain unavailable intent */ }
+  }
+  return { fileName: APPROVED_GOLD_NAME, kind: 'cube', text: '', busy: false, library: identity, ...(result ? { result } : { error: t('approvedGoldUnavailable') }) };
+}
+function installApproved(id: SlotId, identity: string): void {
+  presetRuns.set(id, ++presetRun);
+  setSlot(id, { preset: approvedPreset(identity, true) });
+}
+function reconcileApprovedGold(): void {
+  for (const id of SLOT_IDS) { const identity = state.slots[id].preset?.library; if (isApprovedGoldIntent(identity)) installApproved(id, identity); }
+}
+function clearApprovedNames(id: SlotKey): void {
+  if (isExtra(id) || !isApprovedGoldIntent(slotOf(id)?.preset?.library)) return;
+  setSlot(id as SlotId, sl => ({ names: Object.fromEntries(Object.entries(sl.names).filter(([, name]) => name !== APPROVED_GOLD_NAME)) }));
+}
+export function resolvedPresetResult(id: SlotKey, s: State = state): UiPresetResult | undefined {
+  const p = slotOf(id, s)?.preset;
+  if (!isApprovedGoldIntent(p?.library)) return p?.result;
+  return p.library === APPROVED_GOLD_ID && supportsApprovedGold(s.info, s.model) && matchesApprovedGold(p.result) ? p.result : undefined;
+}
+export function unavailableLibraryProblem(s: State = state): string | undefined {
+  return availableSlots(s).some(id => isApprovedGoldIntent(s.slots[id]?.preset?.library) && !resolvedPresetResult(id, s)) ? t('approvedGoldUnavailable') : undefined;
+}
 const clampStep = (v: unknown): number => (Number.isInteger(v) ? Math.max(-4, Math.min(4, v as number)) : 0);
 function validRecipe(r: unknown): RecipeState | undefined {
   if (!r || typeof r !== 'object') return undefined;
   const x = r as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   const amount = [0, 1, 2, 3].includes(x.grain?.amount) ? x.grain.amount : 0;
-  return { sharpness: clampStep(x.sharpness), clarity: clampStep(x.clarity), shading: clampStep(x.shading), grain: { amount, size: x.grain?.size === 'large' ? 'large' : 'small' }, sky: clampStep(x.sky) };
+  return { sharpness: clampStep(x.sharpness), clarity: clampStep(x.clarity), shading: clampStep(x.shading), grain: { amount, size: x.grain?.size === 'large' ? 'large' : 'small' }, sky: clampStep(x.sky), ...(x.filmMtf === true ? { filmMtf: true } : {}) };
 }
 /** The recipe of a film (neutral when it has none). */
 export const recipeOf = (id: SlotId, s: State = state): RecipeState => s.slots[id]?.recipe ?? NEUTRAL_RECIPE;
 /** Recipes are built on GR III / IIIx with a film count (round 10). */
 export const recipesAvailable = (s: State = state): boolean => filmCountChoosable(s);
 export function setRecipe(id: SlotId, patch: Partial<RecipeState>): void {
-  setSlot(id, (sl) => ({ recipe: { ...(sl.recipe ?? NEUTRAL_RECIPE), ...patch } }));
+  setSlot(id, (sl) => ({ recipe: validRecipe({ ...(sl.recipe ?? NEUTRAL_RECIPE), ...patch }) }));
   scheduleSave();
+}
+export function setTextureGeometry(policy: 'sensor' | 'output' | undefined): void {
+  if (!isGr3(state.model)) return;
+  set({ textureGeometry: policy }); scheduleSave();
+}
+/** Session-only owner snapshot for an explicit pull; no recipe or clipboard is stored here. */
+export interface TextureReuseChoice {
+  readonly from: SlotId; readonly to: SlotId; readonly label: string;
+  readonly owner: State; readonly info: FirmwareInfo; readonly raw: Uint8Array; readonly model: CameraModel;
+  readonly source: SlotState; readonly target: SlotState; readonly filmCount: number;
+}
+export function textureReuseSupported(s: State = state): boolean {
+  return !!s.raw && !s.busy && !s.fwBusy && recipesAvailable(s) && supportsApprovedGold(s.info, s.model);
+}
+function textureParticipantReady(id: SlotId, s: State): boolean {
+  const p = s.slots[id]?.preset;
+  return !p || (!p.busy && !p.error && !!resolvedPresetResult(id, s));
+}
+/** The same current-owner checks supply the chooser and validate a later callback. */
+export function textureReuseChoices(to: SlotId, s: State = state): TextureReuseChoice[] {
+  if (!textureReuseSupported(s) || s.activeSlot !== to || !shownSlots(s).some(x => x.id === to) || !textureParticipantReady(to, s)) return [];
+  return shownSlots(s).filter(x => x.id !== to && textureParticipantReady(x.id, s)).map(x => {
+    const key = `g${64 + GR3X_FILM_IDS.indexOf(x.id)}`, alias = lookName(key, s),
+      identity = lookIdentity(key, s) ?? [x.defaultName, requestedSourceLabel(s.slots[x.id]?.preset)].filter(Boolean).join(' · ');
+    return { from: x.id, to, label: identity && identity !== alias ? `${alias} · ${identity}` : alias,
+      owner: s, info: s.info!, raw: s.raw!, model: s.model, source: s.slots[x.id], target: s.slots[to], filmCount: s.filmCount };
+  });
+}
+/** One atomic texture/detail update. Refused or stale choices have no state/save/toast side effects. */
+export function reuseTexture(choice: TextureReuseChoice): boolean {
+  if (!choice) return false;
+  const current = textureReuseChoices(choice.to).find(x => x.from === choice.from);
+  if (!current || current.owner !== choice.owner || current.info !== choice.info || current.raw !== choice.raw || current.model !== choice.model ||
+      current.source !== choice.source || current.target !== choice.target || current.filmCount !== choice.filmCount) return false;
+  const source = recipeOf(choice.from), target = recipeOf(choice.to), halo = halationOf(choice.from);
+  const recipe: RecipeState = { ...target, sharpness: source.sharpness, clarity: source.clarity, shading: source.shading,
+    grain: { amount: source.grain.amount, size: source.grain.amount > 0 ? source.grain.size : target.grain.size } };
+  delete recipe.filmMtf;
+  if (source.filmMtf === true) recipe.filmMtf = true;
+  const halation: HalationState = { ...(current.target.halation ?? { on: true, preview: 0 }), preview: halo.preview };
+  if (halo.preview > 0) halation.colour = halo.colour ?? 'red';
+  setSlot(choice.to, { recipe, halation });
+  scheduleSave();
+  return true;
 }
 /** A film of the library into a slot: its colour, name (every language), icon and recipe. */
 export function useLibraryFilm(id: SlotId, name: string): void {
+  if (isApprovedGoldIntent(name)) {
+    presetEdits.add(id);
+    setSlot(id, { names: Object.fromEntries(LANGS.map(l => [l, APPROVED_GOLD_NAME])), icon: { mode: 'library', look: name, text: '', style: 'film' } });
+    installApproved(id, name); setActiveSlot(id);
+    if (host.available) void host.storeDel(presetKey(id)).catch(() => undefined);
+    void renderIcon(id); scheduleSave(); return;
+  }
   const look = libraryLook(name);
   if (!look) return;
+  presetEdits.add(id);
   const d = look.recipe?.defaults ?? {};
   setSlot(id, {
     names: Object.fromEntries(LANGS.map((l) => [l, look.name])),
@@ -621,15 +725,24 @@ export function decodeText(buf: Uint8Array): string {
 }
 export async function loadPresetFile(id: SlotKey, file: File): Promise<void> {
   if (file.size > 120_000_000) { toast(t('errTooBig'), 'error'); return; }
+  presetEdits.add(id);
+  const run = ++presetRun, gen = familyGen, fam = familyOf(state.model);
+  presetRuns.set(id, run);
+  const current = (): boolean => presetRuns.get(id) === run && familyGen === gen;
   const text = decodeText(new Uint8Array(await file.arrayBuffer()));
+  if (!current()) return;
   const lower = file.name.toLowerCase();
   const kind: 'xmp' | 'cube' = lower.endsWith('.cube') ? 'cube' : lower.endsWith('.xmp') ? 'xmp' : /LUT_(3D|1D)_SIZE/i.test(text) ? 'cube' : 'xmp';
   setActiveSlot(id);
-  if (host.available) await host.storeSet(presetKey(id), text).catch(() => undefined);
+  if (host.available) await host.storeSet(presetKey(id, fam), text).catch(() => undefined);
+  if (!current()) return;
   await runPreset(id, file.name, kind, text);
   scheduleSave();
 }
 export function removePreset(id: SlotKey): void {
+  presetEdits.add(id);
+  presetRuns.set(id, ++presetRun);
+  clearApprovedNames(id);
   patchSlot(id, (sl) => ({ preset: undefined, ...(sl.icon.mode === 'library' ? { icon: { ...sl.icon, mode: 'keep' as const, look: undefined, pixels: undefined } } : {}) }));
   if (host.available) void host.storeDel(presetKey(id)).catch(() => undefined);
   scheduleSave();
@@ -714,6 +827,20 @@ export function lookName(key: string, s: State = state): string {
   }
   const x = lookExtras(s).find((e) => e.key === key);
   return x ? extraName(x, s) : key;
+}
+function requestedSourceLabel(preset: PresetState | undefined): string | undefined {
+  return isApprovedGoldIntent(preset?.library) ? APPROVED_GOLD_NAME : libraryLook(preset?.library)?.name ??
+    (preset ? [t('preset'), preset.fileName.split(/[\\/]/).pop() || preset.result?.title].filter(Boolean).join(' · ') : undefined);
+}
+/** The active GR III 2.10 film slot and its requested source, independent of its editable camera name. */
+export function lookIdentity(key: string, s: State = state): string | undefined {
+  const info = s.info;
+  if (!info || !supportsApprovedGold(info, s.model) || !info.capabilities.lookLayout || !key.startsWith('g') || !lookKeys(s).includes(key)) return undefined;
+  const id = GR3X_FILM_IDS[Number(key.slice(1)) - 64];
+  const slot = info.slots.find((x) => x.id === id);
+  if (!id || !slot) return undefined;
+  const source = requestedSourceLabel(s.slots[id]?.preset);
+  return source ? `${slot.defaultName} · ${source}` : slot.defaultName;
 }
 /** Keep a saved order valid for the keys there are: drop unknown keys, append the missing ones in the camera's order. */
 function normalizeOrder(order: readonly string[], keys: readonly string[]): string[] {
@@ -899,7 +1026,7 @@ async function renderIcon(id: SlotKey): Promise<void> {
   if (!info?.capabilities.presets || ic.mode === 'keep') { if (ic.pixels) patchSlot(id, (s) => ({ icon: { ...s.icon, pixels: undefined } })); return; }
   const tile = info.tiles[ic.style]; const area = info.contentArea[ic.style];
   let pixels: Uint8Array | undefined;
-  if (ic.mode === 'library') { const look = libraryLook(ic.look); pixels = look ? filmpack.filmIcon(info.tiles.film, look) : undefined; }
+  if (ic.mode === 'library') { const look = libraryIconLook(ic.look); pixels = look ? filmpack.filmIcon(info.tiles.film, look) : undefined; }
   else if (ic.mode === 'text') { await ensureIconFont(); pixels = ic.text.trim() ? textIcon(tile, ic.text, area) : undefined; }
   else if (ic.image) { const b = await bitmapOf(ic.image); pixels = imageIcon(tile, b, b.width, b.height, area); }
   const cur = slotOf(id)?.icon;
@@ -1148,6 +1275,7 @@ export function removeFilm(id: SlotId): void {
   const k = ids.indexOf(id);
   if (k < 0 || k >= n) return;
   if (ids.slice(k, n).some((x) => state.slots[x].preset?.busy)) { toast(t('converting'), 'info'); return; }
+  for (const key of ids.slice(k, n)) { presetRuns.set(key, ++presetRun); presetEdits.add(key); }
   const look = (key: string): string | null => {
     const f = key.startsWith('g') ? Number(key.slice(1)) - 64 : -1;
     if (!(f >= 0 && f < n)) return key;
@@ -1183,9 +1311,15 @@ export function setActiveRatio(id: string): void { if (state.activeRatio !== id)
 // ------------------------------------------------------------------ preview photo
 const PREVIEW_KEY = 'preview.jpg';
 let photo: ImageData | null = null;
+let originalPhoto: PreviewOriginal | null = null;
+let photoGeneration = 0;
+export const previewOriginal = (): PreviewOriginal | null => originalPhoto;
+export function setPreviewMain(previewMain: boolean): void { set({ previewMain: !!originalPhoto && previewMain }); }
 /** The picture the slot previews are drawn on; changes whenever `photoRev` does. */
 export const previewPhoto = (): ImageData | null => photo;
 async function loadPreviewPhoto(): Promise<void> {
+  const generation = ++photoGeneration, family = familyGen;
+  originalPhoto = null; photo = null; set(s => ({ previewMain: false, photoRev: s.photoRev + 1 }));
   try {
     // a sample; else the user's own choice, then a `preview.jpg` kept next to the program, then the studio scene built in
     const sample = SAMPLES.find((x) => x.id === state.sample);
@@ -1193,7 +1327,9 @@ async function loadPreviewPhoto(): Promise<void> {
     if (!bytes) bytes = await host.storeGet(PREVIEW_KEY).catch(() => null);
     if (!bytes) bytes = await host.sidecar(PREVIEW_KEY).catch(() => null);
     if (!bytes) bytes = new Uint8Array(await (await fetch(defaultPhotoUrl)).arrayBuffer());
-    photo = await decodePreview(bytes);
+    const decoded = await decodePreview(bytes);
+    if (generation !== photoGeneration || family !== familyGen) return;
+    photo = decoded;
     set((s) => ({ photoRev: s.photoRev + 1 }));
   } catch (e) { console.warn('preview photo', e); }
 }
@@ -1205,11 +1341,17 @@ export function setSample(sample: string): void {
   scheduleSave();
 }
 export async function loadPreviewFile(file: File): Promise<void> {
+  const generation = ++photoGeneration, family = familyGen;
+  originalPhoto = null; photo = null; set(s => ({ previewMain: false, photoRev: s.photoRev + 1 }));
   try {
+    const geometry = previewJpeg(new Uint8Array(await file.arrayBuffer()));
     const bmp = await loadBitmap(file);
-    const wc = await workingCopy(bmp, 2400);
-    bmp.close();
-    photo = await decodePreview(wc.blob);
+    let wc: Awaited<ReturnType<typeof workingCopy>>;
+    try { wc = await workingCopy(bmp, 2400); } finally { bmp.close(); }
+    const decoded = await decodePreview(wc.blob);
+    if (generation !== photoGeneration || family !== familyGen) return;
+    photo = decoded;
+    originalPhoto = geometry ? { blob: file, width: geometry.width, height: geometry.height, orientation: geometry.orientation } : null;
     set((s) => ({ photoRev: s.photoRev + 1, previewMode: 'photo', ratioBackdrop: 'photo', sample: 'own' }));
     if (host.available) await host.storeSet(PREVIEW_KEY, new Uint8Array(await wc.blob.arrayBuffer())).catch(() => undefined);
     scheduleSave();
@@ -1256,7 +1398,8 @@ export function pendingChanges(s: State = state): SlotChange[] {
   for (const id of availableSlots(s)) {
     const sl = s.slots[id]; const off = s.info.slots.find((x) => x.id === id)!;
     const req: SlotRequest = { slot: id }; const parts: string[] = []; const labels: string[] = [];
-    if (sl.preset?.result) { const r = sl.preset.result; req.preset = { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) }; parts.push(`${t('preset')} ${sl.preset.result.title || sl.preset.fileName}`); labels.push(t('preset')); }
+    const r = resolvedPresetResult(id, s);
+    if (r) { const owned = isApprovedGoldIntent(sl.preset?.library); req.preset = { matrixQ13: owned ? r.matrixQ13.slice() : r.matrixQ13, curves: owned ? r.curves.map(c => c.slice()) as typeof r.curves : r.curves, ...(r.postQ9 ? { postQ9: owned ? r.postQ9.slice() : r.postQ9 } : {}) }; parts.push(`${t('preset')} ${r.title || sl.preset!.fileName}`); labels.push(t('preset')); }
     if (sl.icon.mode !== 'keep' && sl.icon.pixels) { req.icon = sl.icon.pixels; parts.push(t('icon')); labels.push(t('icon')); }
     const names: Partial<Record<LangCode, string>> = {};
     for (const lang of LANGS) {
@@ -1272,6 +1415,7 @@ export function pendingChanges(s: State = state): SlotChange[] {
       if (h && h.preview > 0 && !filmCountChoosable(s)) { req.halation = h.preview === 1 ? 1 : 2; parts.push(`${t('halation')} ${t(h.preview === 1 ? 'haloWeak' : 'haloStrong')}`); labels.push(t('halation')); }
       // Round 10: the film's recipe (where the camera's parameters start, its grain).
       if (filmCountChoosable(s)) {
+        if (sl.recipe?.filmMtf === true) { req.filmMtf = true; parts.push(t('filmMtf')); labels.push(t('filmMtf')); }
         const d = recipeDefaults(sl), g = sl.recipe?.grain;
         if (d) { req.defaults = d; parts.push(t('recipe')); labels.push(t('recipe')); }
         if (g && g.amount) { req.grain = g; parts.push(t('filmGrain')); labels.push(t('filmGrain')); }
@@ -1344,6 +1488,8 @@ export async function outputFirmware(dest: Dest, stock = false): Promise<void> {
   if (!stock && !state.info.capabilities.build) { toast(t('fwCannotBuild'), 'info'); return; }
   if (state.busy || state.fwBusy || !state.info || !state.raw) return;
   if (bridgeLoaded()) { askForOfficial(); return; }
+  const unavailable = !stock && unavailableLibraryProblem();
+  if (unavailable) { toast(unavailable, 'error'); return; }
   const sourceInfo = state.info, sourceRaw = state.raw, sourceModel = state.model;
   const changes = stock ? [] : pendingChanges();
   const ratios = stock ? [] : ratioSpecs();
@@ -1361,8 +1507,21 @@ export async function outputFirmware(dest: Dest, stock = false): Promise<void> {
   if (!noPictures && state.wall.length > 0 && !menuReady()) { toast(t('wallMenuIncomplete'), 'error'); return; }
   const pictures = noPictures ? [] : menuPictures();
   const films = filmCountChoosable() ? state.filmCount : 0;
+  const textureGeometry = films ? state.textureGeometry : undefined;
   const lookLayout = stock ? undefined : lookLayoutSpec();
   if (!stock && changes.length === 0 && ratios.length === 0 && !soft && !dateStamp && !monoUnlock && !directFlash && extras.length === 0 && pictures.length === 0 && films === 0 && !lookLayout) { toast(t('nothingToDo'), 'info'); return; }
+  const clarity = soft && sourceInfo.features.softFocus === 'clarity' ? [...GR3X_SOFT_FOCUS] : [];
+  let submitted: BuildArguments = { requests: changes.map(c => c.request), ratios, softFocus: clarity,
+    options: { adjSoftFocus: soft && sourceInfo.features.softFocus === 'adj', dateStamp, monoUnlock, ...(directFlash ? { directFlash } : {}), ...(extras.length ? { extraSlots: extras } : {}), ...(pictures.length ? { shutdownPictures: pictures } : {}),
+      ...(films ? { filmCount: films, tealHue: true, grainRow: true, ...(textureGeometry ? { textureGeometry } : {}) } : {}), ...(lookLayout ? { lookLayout } : {}) } };
+  let receiptSource: ReceiptSource | undefined;
+  if (!stock && dest.kind === 'folder' && supportsBuildReceipt(sourceInfo, sourceModel)) {
+    try {
+      submitted = snapshotBuildArguments(submitted);
+      receiptSource = { model: sourceModel, filename: sourceInfo.filename, version: sourceInfo.version, sha256: sourceInfo.sha256, raw: sourceRaw.slice() };
+    } catch { toast(t('receiptPrepareFailed'), 'error'); return; }
+  }
+  const applicationVersion = host.info?.version ?? null;
   if (stock && !(await askOfficial([t('copyOfficial')]))) return;
   if (dest.kind === 'card' && !stock) {
     const lines = changes.map((c) => `${state.info?.family === 'gr3x' ? (state.slots[c.id].names[state.lang] || state.info.slots.find(s => s.id === c.id)?.defaultName || c.id) : t(('slot' + c.id) as Key)}  ·  ${c.labels.join(' / ')}`);
@@ -1379,29 +1538,39 @@ export async function outputFirmware(dest: Dest, stock = false): Promise<void> {
     if (!(await ask(t('confirmTitle'), lines, t('confirmOk')))) return;
   }
   const target = await destination(dest);
-  if (!target || state.info !== sourceInfo || state.raw !== sourceRaw || state.model !== sourceModel || state.fwBusy) return;
+  if (!target || state.info !== sourceInfo || state.raw !== sourceRaw || state.model !== sourceModel || state.fwBusy || (receiptSource && state.busy)) return;
+  let writingPair = false;
   try {
     let file: Uint8Array;
+    let receipt: Awaited<ReturnType<typeof encodeBuildReceipt>> | undefined;
     if (stock) file = sourceRaw;
     else {
       set({ busy: t('building') });
-      const clarity = soft && sourceInfo.features.softFocus === 'clarity' ? [...GR3X_SOFT_FOCUS] : [];
-      const built = await engine.build(changes.map((c) => c.request), ratios, clarity,
-        { adjSoftFocus: soft && sourceInfo.features.softFocus === 'adj', dateStamp, monoUnlock, ...(directFlash ? { directFlash } : {}), ...(extras.length ? { extraSlots: extras } : {}), ...(pictures.length ? { shutdownPictures: pictures } : {}),
-          // The films' Hue row is their teal sky, and they have the Grain row and gold Halation (every
-          // film of GR Mod's builds with a film count).
-          ...(films ? { filmCount: films, tealHue: true, grainRow: true } : {}), ...(lookLayout ? { lookLayout } : {}) });
+      const built = await engine.build(submitted.requests, submitted.ratios, submitted.softFocus, submitted.options);
       if (!Object.values(built.checks).every((v) => v === true)) throw new EngineError('selfcheck-failed', 'self-check');
       file = built.file;
       void recordBuild(file, changes);
+      if (receiptSource) {
+        receipt = await encodeBuildReceipt(submitted, receiptSource, built, applicationVersion);
+        if (state.info !== sourceInfo || state.raw !== sourceRaw || state.model !== sourceModel || state.fwBusy) { set({ busy: undefined }); return; }
+        file = receipt.firmware;
+      }
     }
     set({ busy: t('writing') });
     let moved = 0;
     if (target.volume) moved = await firmwareToCard(target.volume, file);
-    else await runPlan(target.root, [{ op: 'write', path: [firmwareFilename()], data: file }]);
+    else {
+      writingPair = !!receipt;
+      await runPlan(target.root, [{ op: 'write', path: [receiptSource?.filename ?? firmwareFilename()], data: file }]);
+      if (receipt) {
+        try { await runPlan(target.root, [{ op: 'write', path: [receipt.filename], data: receipt.bytes }]); }
+        catch { set({ busy: undefined }); toast(t('receiptPartial'), 'error'); return; }
+      }
+    }
     set({ busy: undefined });
-    doneToast(target.root, target.volume, moved, firmwareFilename());
-  } catch (e) { set({ busy: undefined }); fail(e); }
+    if (receipt) toast(t('receiptExported', { p: target.root }), 'ok', { label: t('reveal'), run: () => { void host.reveal(host.join(target.root, receipt!.filename)); } });
+    else doneToast(target.root, target.volume, moved, firmwareFilename());
+  } catch (e) { set({ busy: undefined }); if (receiptSource) toast(t(writingPair ? 'receiptPairFailed' : 'receiptPrepareFailed'), 'error'); else fail(e); }
   void refreshVolumes();
 }
 
@@ -1574,10 +1743,11 @@ export function describeCopy(summary: FirmwareSummary, s: State = state): string
   const build = s.builds.find((b) => b.sha256 === summary.sha256);
   const lines = summary.slots.map((sl) => {
     const preset = build?.slots.find((x) => x.id === sl.id)?.preset;
-    const parts = [sl.colorChanged ? preset || t('copyColor') : '', sl.iconChanged ? t('copyIcon') : '', sl.nameChanged ? t('copyName') : ''].filter(Boolean);
+    const parts = [sl.colorChanged ? preset || t('copyColor') : '', sl.iconChanged ? t('copyIcon') : '', sl.nameChanged ? t('copyName') : '', sl.filmMtf === true ? t('filmMtf') : ''].filter(Boolean);
     return `${sl.names[s.lang]}  ·  ${parts.join(' / ') || t('original')}`;
   });
   if (summary.ratios.length) lines.push(t('ratioLine', { n: summary.ratios.length, l: summary.ratios.map((r) => r.name).join(' / ') }));
+  if (summary.textureGeometry) lines.push(`${t('textureScale')} · ${t(summary.textureGeometry === 'sensor' ? 'textureSensor' : 'textureOutput')}`);
   if (summary.adjSoftFocus) lines.push(t('softAdjLine'));
   if (summary.dateStamp) lines.push(t('dateLine'));
   if (summary.monoUnlock) lines.push(t(state.info?.family === 'gr3x' ? 'gr3xReplicaLine' : 'monoLine'));

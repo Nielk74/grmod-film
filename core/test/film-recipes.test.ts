@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // GR Mod's film recipes (GR III / IIIx round 10: camera defaults and grain) and the film library.
 // The build tests need the official GR III 2.10 file (GRMOD_GR3_FIRMWARE); the rest runs without it.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Engine } from '../src';
 import { convertGr3xCube } from '../src/color/gr3x-import';
@@ -12,6 +13,22 @@ import { GR3X_FILMS_DEFAULTS_MODULE } from '../src/fw/gr3x/films-defaults-native
 import { GR3X_FILMS_GRAIN_MODULE } from '../src/fw/gr3x/films-grain-native';
 import { GR3X_FILM_IDS } from '../src/fw/gr3x/look-resources';
 import { GR3X_T4_CUSTOM } from '../src/fw/gr3x/geometry';
+import { encodeGr3xLookRecipe, readGr3xLookRecipe } from '../src/fw/gr3x/look-recipe';
+
+describe('crop texture recipe policy', () => {
+  it('round trips explicit policies and refuses invalid policy values', () => {
+    const base = { displayRevision: 3 as const, ownParameters: true, filmCount: 1, films: [{ name: 'Texture' }] };
+    for (const textureGeometry of ['sensor', 'output'] as const) {
+      expect(readGr3xLookRecipe(encodeGr3xLookRecipe({ ...base, textureGeometry }))?.textureGeometry).toBe(textureGeometry);
+    }
+    expect(readGr3xLookRecipe(encodeGr3xLookRecipe(base))?.textureGeometry).toBeUndefined();
+    expect(() => encodeGr3xLookRecipe({ ...base, textureGeometry: 'bad' as never })).toThrow(/geometry/i);
+    const malformed = encodeGr3xLookRecipe({ ...base, textureGeometry: 'sensor' });
+    const bytes = Buffer.from(malformed), at = bytes.indexOf('sensor');
+    bytes.write('broken', at, 'utf8');
+    expect(() => readGr3xLookRecipe(bytes)).toThrow(/recipe/);
+  });
+});
 
 describe('film recipes: the starting values', () => {
   it('encodes the parameters as films.c reads them (order, scales, Halation states)', () => {
@@ -99,6 +116,24 @@ const firmware = process.env.GRMOD_GR3_FIRMWARE;
 describe.skipIf(!firmware)('film recipes in a GR III 2.10 build', () => {
   const ratios = GR3X_T4_CUSTOM.map(r => ({ ratio: r.ratio, name: r.name ?? r.ratio }));
   const open = async () => Engine.open(new Uint8Array(readFileSync(firmware!)));
+
+  it('reconstructs the pre-WP2 R10 MTF/grain/gold fixture exactly and reads each explicit policy', async () => {
+    const engine = await open();
+    const requests = [{ slot: GR3X_FILM_IDS[0], names: { en: 'WP2 legacy' }, grain: { amount: 2 as const, size: 'large' as const }, filmMtf: true, defaults: { halation: { strength: 2 as const, gold: true } } }];
+    const options = { filmCount: 1, adjSoftFocus: true, dateStamp: true, grainRow: true };
+    const legacy = await engine.buildFirmware(requests, ratios, [], options);
+    // Captured against db76c9b before any source/module changes; includes all three native payloads.
+    expect(legacy.sha256).toBe('c25f45439dbd1ea3dd339bd59400bf5a1d698043dd610e2425c11f8acbc7faf1');
+    expect((await engine.inspect(legacy.file)).verified).toBe(true);
+    for (const textureGeometry of ['sensor', 'output'] as const) {
+      const built = await engine.buildFirmware(requests, ratios, [], { ...options, textureGeometry });
+      const summary = await engine.inspect(built.file);
+      expect(summary.verified).toBe(true); expect(summary.textureGeometry).toBe(textureGeometry);
+      expect(built.sha256).not.toBe(legacy.sha256);
+    }
+    await expect(engine.buildFirmware(requests, ratios, [], { ...options, textureGeometry: 'bad' as never })).rejects.toThrow(/geometry/);
+    await expect(engine.buildFirmware(requests, ratios, [], { ...options, textureGeometry: 'sensor', gr3Round: 9 })).rejects.toThrow(/round 10/);
+  }, 600000);
 
   it('builds, verifies and reads back every film\'s recipe; a build without recipes stays as before', async () => {
     const engine = await open();
@@ -191,4 +226,48 @@ describe.skipIf(!firmware)('film recipes in a GR III 2.10 build', () => {
     await expect(engine.buildFirmware([{ slot: 'CY', grain: { amount: 1, size: 'small' } }], ratios, [], { filmCount: 2, gr3Round: 9 })).rejects.toThrow();
     await expect(engine.buildFirmware([{ slot: 'CY', defaults: { sharpness: 9 } }], ratios, [], { filmCount: 2 })).rejects.toThrow();
   }, 600000);
+});
+
+
+describe('approved Gold optional data', () => {
+  const metadata = { family: 'gr3x', version: '2.10', filename: 'fwdc239b.bin', models: ['GR3', 'GR3_HDF'], bridge: false,
+    sha256: 'd6a3c9c288d784080e7b283222ecdd8752adfeed6faa36dab44f73115354bfd4', capabilities: { build: true, presets: true },
+    standardMatrixQ13: [8116,743,-667,15,8598,-421,-244,542,7894] };
+  const moduleUrl = new URL('../../ui/src/approved-gold.ts', import.meta.url);
+  const get = async () => { expect(existsSync(moduleUrl), 'tracked approved-Gold factory is required').toBe(true); return import(moduleUrl.href); };
+  const packed = (r: any) => {
+    const values = [...r.matrixQ13, ...r.curves[0], ...r.curves[1], ...r.curves[2], ...r.postQ9];
+    const bytes = new Uint8Array(values.length * 2), view = new DataView(bytes.buffer);
+    values.forEach((v, i) => view.setUint16(i * 2, v & 65535, true)); return bytes;
+  };
+  it('returns the canonical compiled bytes and saved parameters, without changing the default twenty', async () => {
+    const gold = await get(), r = gold.createApprovedGold(metadata as any, 'GR3_HDF')!;
+    expect(r.matrixQ13).toHaveLength(9); expect(r.postQ9).toHaveLength(9); expect(r.curves).toHaveLength(3); r.curves.forEach((c: Uint16Array) => expect(c).toHaveLength(256));
+    expect(r.params.M1.map((row: number[]) => row.length)).toEqual([3,3,3]); expect(r.params.ck.map((row: Float64Array) => row.length)).toEqual([17,17,17]); expect(r.params.P2!.map((row: number[]) => row.length)).toEqual([3,3,3]);
+    const bytes = packed(r); expect(bytes.length).toBe(1572);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe('91158f03a8e83fb36563c1ddc9ef8907b153ff6e47a21f8101827a6b92a7fdb6');
+    const expected = {"M1":[[1.0609664581572797,-0.1236873931405216,0.06272093498324176],[0.0560144493881397,0.8473464964015793,0.0966390542102809],[0.13797423545573362,-0.07980902853238755,0.941834793076654]],"ck":[[0.0896157357467401,0.10186681865578108,0.1275010833350745,0.16835926269378026,0.21606341947486327,0.28608917156902997,0.35737156811339066,0.436805031935872,0.5278015788515321,0.6126637381905242,0.6741237730846269,0.7359538986702452,0.7759715577678598,0.8167140072018888,0.85035003278829,0.8877568210279086,0.899241661868901],[0.025493786603441204,0.06589139404379141,0.10845788327856759,0.15528898175161074,0.2128458084539915,0.27531961650663567,0.3476096931185396,0.4146862516636111,0.5046143346561357,0.5944529255640608,0.6669200469353677,0.7199554988191725,0.773146224334547,0.8134273426538644,0.8492566988244435,0.8809501064267611,0.9055369615373172],[0.11440001574401118,0.11617403260174636,0.13682385536862623,0.1672921304560454,0.21089427222481755,0.2682959517868168,0.3305544865061938,0.40043904711415673,0.46907789026519764,0.5439393474841399,0.6103610278042597,0.6614225407136135,0.7062177421416,0.7542530416281723,0.7919774829224516,0.8337094204511402,0.8413941773594036]],"P2":[[1.0845477569965989,0.09357736525447909,-0.1781251222510779],[0.13747820587674173,0.7984581039948029,0.06406369012845536],[0.01201115567272517,0.12165093430130737,0.8663379100259675]]};
+    expect({ ...r.params, ck: r.params.ck.map((c: Float64Array) => Array.from(c)) }).toEqual(expected);
+    expect(gold.matchesApprovedGold(r)).toBe(true); expect(gold.cie76Fit(r)).toBeUndefined();
+    expect(r.meanDE).toBeUndefined(); expect(r.p95DE).toBeUndefined();
+    expect(LOOKS.map(l => l.name)).toEqual(['Velvia','Astia','Classic Chrome','Classic Neg','Nostalgic Neg','Pro Neg Hi','Pro Neg Std','Eterna','Acros','Acros Red','Kodachrome 64','Portra 400','Gold 200','CineStill 800T','Primrose','Hasselblad Std','Aerochrome','Instant','Blockbuster','Platinum']);
+    expect(createHash('sha256').update(readFileSync(new URL('../src/filmpack/looks.ts', import.meta.url),'utf8').replace(/\r\n/g,'\n')).digest('hex')).toBe('b0e551076d29234006cbd595aaa0835b74b19b5d9430faab3cf3ccccf7a364dd');
+  });
+  it('owns all nested arrays and rejects actual incomplete or mutated data', async () => {
+    const gold = await get(); const a = gold.createApprovedGold(metadata as any, 'GR3')!, b = gold.createApprovedGold(metadata as any, 'GR3')!;
+    for (const array of [a.matrixQ13, ...a.curves, a.postQ9!, ...a.params.M1, ...a.params.ck, ...a.params.P2!]) array[0] += 1;
+    expect(gold.matchesApprovedGold(a)).toBe(false); expect(gold.matchesApprovedGold(b)).toBe(true);
+    expect(gold.matchesApprovedGold({ ...b, curves: [b.curves[0].slice(1), ...b.curves.slice(1)] })).toBe(false);
+    expect(gold.matchesApprovedGold({ ...b, postQ9: undefined })).toBe(false);
+    expect(gold.matchesApprovedGold({ ...b, params: { ...b.params, P2: undefined } })).toBe(false);
+    expect(gold.matchesApprovedGold({ ...b, params: { ...b.params, hue: [[1,0,0],[0,1,0],[0,0,1]] } })).toBe(false);
+    expect(gold.matchesApprovedGold({ ...b, hueQ10: [1] })).toBe(false);
+  });
+  it('requires the exact official profile and Standard reference rather than shared-family similarity', async () => {
+    const gold = await get();
+    for (const [info, model] of [[undefined, 'GR3'], [metadata, 'GR3X'], [{ ...metadata, sha256: 'a'.repeat(64) }, 'GR3'], [{ ...metadata, version: '2.20' }, 'GR3'], [{ ...metadata, filename: 'other.bin' }, 'GR3'], [{ ...metadata, standardMatrixQ13: Array(9).fill(0) }, 'GR3'], [{ ...metadata, capabilities: { build: true, presets: false } }, 'GR3'], [{ ...metadata, bridge: true }, 'GR3']]) {
+      expect(gold.createApprovedGold(info as any, model as any)).toBeUndefined();
+    }
+    expect(gold.createApprovedGold(metadata as any, 'GR3')).toBeDefined();
+  });
 });

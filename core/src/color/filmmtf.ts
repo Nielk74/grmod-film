@@ -29,7 +29,7 @@ export const FILM_MTF_BANDS = 3;
 export const FILM_MTF_STRIP = 192;
 export const FILM_MTF_MARGIN = 32;
 /** Pictures narrower than this (screennail, thumbnail) are left alone: the film's response is for the 6000 pixel frame. */
-export const FILM_MTF_MIN_WIDTH = 4096;
+export const FILM_MTF_MIN_WIDTH = 960;
 
 // JPEG's YCbCr <-> RGB (Cb, Cr centred on 0)
 const Q: number[][] = [[1, 0, 1.402], [1, -0.344136, -0.714136], [1, 1.772, 0]];
@@ -59,7 +59,7 @@ export function filmMtfMatrices(gains: Readonly<Record<'R' | 'G' | 'B', readonly
 export interface Ycc422 { y: Uint8Array; c: Uint8Array; width: number; height: number; stride: number }
 
 /** True when the module works on a picture of this size (as picture_ok in the C module). */
-export const filmMtfApplies = (w: number, h: number, minWidth = FILM_MTF_MIN_WIDTH) => w >= minWidth && w <= 12000 && h >= 64 && h <= 12000 && (w & 7) === 0 && (h & 7) === 0;
+export const filmMtfApplies = (w: number, h: number, minWidth = FILM_MTF_MIN_WIDTH) => Number.isInteger(w) && Number.isInteger(h) && w >= minWidth && w <= 12000 && h >= 64 && h <= 12000 && (w & 1) === 0;
 
 interface Planes { w: number; h: number; a: Int16Array; b: Int16Array; c: Int16Array } // Y, Cb, Cr in sixteenths
 const planes = (w: number, h: number): Planes => ({ w, h, a: new Int16Array(w * h), b: new Int16Array(w * h), c: new Int16Array(w * h) });
@@ -154,8 +154,10 @@ function strip(A: Int16Array, w: number, eh: number, yr: (i: number) => Uint8Arr
 
 /** Apply the film MTF to a 4:2:2 picture, in place. Returns false (and changes nothing) when the picture is not one the module handles. */
 export function filmMtf(p: Ycc422, A: Int16Array = filmMtfMatrices(), minWidth = FILM_MTF_MIN_WIDTH): boolean {
-  const { width: w, height: h, stride } = p;
-  if (!filmMtfApplies(w, h, minWidth) || p.stride < w) return false;
+  const { stride } = p;
+  if (!filmMtfApplies(p.width, p.height, minWidth) || !Number.isInteger(stride) || stride < p.width || p.y.length < stride * p.height || p.c.length < stride * p.height) return false;
+  // The three pyramid halvings require multiples of eight. Keep descriptor, tails and row pitch intact.
+  const w = p.width & ~7, h = p.height & ~7;
   const S = FILM_MTF_STRIP, M = FILM_MTF_MARGIN;
   let carryY = new Uint8Array(0), carryC = new Uint8Array(0), carryRows = 0;
   for (let core0 = 0; core0 < h; core0 += S) {
@@ -168,6 +170,47 @@ export function filmMtf(p: Ycc422, A: Int16Array = filmMtfMatrices(), minWidth =
     for (let r = 0; r < nextTop; r++) { cy.set(yr(top + core1 - core0 - nextTop + r), r * w); cc.set(cr(top + core1 - core0 - nextTop + r), r * w); }
     for (let r = 0; r < core1 - core0; r++) { p.y.set(out.y.subarray(r * w, (r + 1) * w), (core0 + r) * stride); p.c.set(out.c.subarray(r * w, (r + 1) * w), (core0 + r) * stride); }
     carryY = cy; carryC = cc; carryRows = nextTop;
+  }
+  return true;
+}
+
+/** Desktop eligibility follows the selected firmware policy; absence retains the legacy guard. */
+export function filmMtfPreviewApplies(w: number, h: number, policy?: 'sensor' | 'output'): boolean {
+  if (policy === undefined) return filmMtfApplies(w, h, 4096) && (w & 7) === 0 && (h & 7) === 0;
+  return (policy === 'sensor' || policy === 'output') && filmMtfApplies(w, h);
+}
+
+/**
+ * Apply the native YCbCr MTF changes to RGBA without replacing the original RGB with a 4:2:2 round trip.
+ * Alpha, unprocessed edge pixels and any bytes after the image stay intact. A true result means the
+ * filter ran, including flat images whose native delta is zero.
+ */
+export function filmMtfRgba(data: Uint8ClampedArray, w: number, h: number, policy?: 'sensor' | 'output'): boolean {
+  if (!filmMtfPreviewApplies(w, h, policy) || data.length < w * h * 4) return false;
+  const y = new Uint8Array(w * h), c = new Uint8Array(w * h);
+  for (let row = 0; row < h; row++) for (let x = 0; x < w; x += 2) {
+    const p = row * w + x;
+    let cb = 0, cr = 0;
+    for (let k = 0; k < 2; k++) {
+      const i = (p + k) * 4, r = data[i], g = data[i + 1], b = data[i + 2];
+      y[p + k] = clamp8(Math.round(0.299 * r + 0.587 * g + 0.114 * b));
+      cb += -0.168736 * r - 0.331264 * g + 0.5 * b;
+      cr += 0.5 * r - 0.418688 * g - 0.081312 * b;
+    }
+    c[p] = clamp8(Math.round(cb / 2 + 128)); c[p + 1] = clamp8(Math.round(cr / 2 + 128));
+  }
+  const beforeY = y.slice(), beforeC = c.slice();
+  filmMtf({ y, c, width: w, height: h, stride: w });
+  for (let p = 0; p < w * h; p += 2) {
+    const db = c[p] - beforeC[p], dr = c[p + 1] - beforeC[p + 1];
+    for (let k = 0; k < 2; k++) {
+      const dy = y[p + k] - beforeY[p + k];
+      if (dy === 0 && db === 0 && dr === 0) continue;
+      const i = (p + k) * 4;
+      data[i] += dy + 1.402 * dr;
+      data[i + 1] += dy - 0.344136 * db - 0.714136 * dr;
+      data[i + 2] += dy + 1.772 * db;
+    }
   }
   return true;
 }

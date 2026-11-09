@@ -7,6 +7,11 @@ scratch
 __pycache__/
 .DS_Store
 research/
+# Decision documents are source; the local research cache remains ignored.
+!docs/research/
+docs/research/*
+!docs/research/gr3-210/
+!docs/research/gr3-210/**
 # Locally downloaded LUT inputs and firmware/build outputs are not source.
 examples/gr3x/T6/*.cube
 examples/gr3x/T6/sources/

@@ -18,6 +18,7 @@ Needs the Python packages unicorn and numpy.
 """
 import base64
 import json
+import os
 import re
 import struct
 import subprocess
@@ -27,10 +28,10 @@ from pathlib import Path
 
 import numpy as np
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
-from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_SP, UC_ARM_REG_LR
+from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC
 
 ROOT = Path(__file__).resolve().parents[2]
-TS = (ROOT / 'core/src/fw/gr3x/filmmtf-code.ts').read_text()
+TS = (ROOT / 'core/src/fw/gr3x/filmmtf-code.ts').read_text(encoding='utf-8')
 CODE = base64.b64decode(re.search(r"FILM_MTF_CODE = '([^']+)'", TS).group(1))
 VITE = ROOT / 'node_modules/.bin/vite-node.cmd' if sys.platform == 'win32' else ROOT / 'node_modules/.bin/vite-node'
 MAGIC = 0x3146544D
@@ -66,12 +67,12 @@ def reference(plane, c, w, h, stride):
                            capture_output=True, text=True, cwd=ROOT)
         if r.returncode:
             sys.exit(r.stdout + r.stderr)
-        info = json.loads((t / 'mix').read_text())
+        info = json.loads((t / 'mix').read_text(encoding='utf-8'))
         return (np.frombuffer((t / 'oy').read_bytes(), dtype=np.uint8).reshape(h, stride),
                 np.frombuffer((t / 'oc').read_bytes(), dtype=np.uint8).reshape(h, stride), info)
 
 
-def run(mix, data, stash=0x10000 | 35, look_map=None, magic=MAGIC, fmt=1, main=(4096, 520), heap_size=0x800000, buf=(4160, 600)):
+def run(mix, data, stash=0x10000 | 35, look_map=None, magic=MAGIC, fmt=1, main=(4096, 520), heap_size=0x800000, buf=(4160, 600), stride=None, primary_invalid=False, primary_missing=False):
     mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     mu.mem_map(CODE_AT, 0x10000)
     mu.mem_write(CODE_AT, CODE)
@@ -114,24 +115,30 @@ def run(mix, data, stash=0x10000 | 35, look_map=None, magic=MAGIC, fmt=1, main=(
     ctx = struct.pack('<7I', *(STUB + i * 16 for i in range(5)), STASH, magic) + struct.pack('<36h', *mix) + bytes(lm)
     mu.mem_write(CTX, ctx)
 
-    def desc(a, yp, cp, w, h, stride, ch):
-        mu.mem_write(a, struct.pack('<B3xIII HHHH HH 4x', fmt, yp, cp, 0, w, h, stride, ch, 0, 0))
-    desc(DESC, main_y, main_c, mw, mh, bw, bh)
+    def desc(a, yp, cp, w, h, stride, ch, form=fmt):
+        mu.mem_write(a, struct.pack('<B3xIII HHHH HH 4x', form, yp, cp, 0, w, h, stride, ch, 0, 0))
+    desc(DESC, main_y, main_c, mw, mh, stride or bw, bh, 2 if primary_invalid else fmt)
     desc(DESC + 0x20, SN_Y, SN_C, 720, 480, 736, 480)
     desc(DESC + 0x40, TH_Y, TH_C, 160, 120, 160, 120)
-    desc(DESC + 0x60, main_y, main_c, mw, mh, bw, bh)
-    mu.mem_write(CONFIG + 0x3C, struct.pack('<4I', DESC, DESC + 0x20, DESC + 0x40, DESC + 0x60))
+    desc(DESC + 0x60, main_y, main_c, mw if primary_invalid or primary_missing else mw + 32, mh, stride or bw, bh)
+    mu.mem_write(CONFIG + 0x3C, struct.pack('<4I', 0 if primary_missing else DESC, DESC + 0x20, DESC + 0x40, DESC + 0x60))
     mu.reg_write(UC_ARM_REG_SP, STACK)
     mu.reg_write(UC_ARM_REG_LR, STUB + 0x100)
     mu.reg_write(UC_ARM_REG_R0, CTX)
     mu.reg_write(UC_ARM_REG_R1, CONFIG)
+    descriptors_before = bytes(mu.mem_read(DESC, 0x80))
     n = [0]
 
     def counter(uc, addr, size, ud):
         n[0] += 1
-    mu.hook_add(UC_HOOK_CODE, counter, begin=CODE_AT, end=CODE_AT + 0x10000)
+    if os.environ.get("GRMOD_COUNT_MTF"):
+        mu.hook_add(UC_HOOK_CODE, counter, begin=CODE_AT, end=CODE_AT + 0x10000)
     mu.emu_start(CODE_AT, STUB + 0x100, count=40_000_000_000)
     got = {name: (bytes(mu.mem_read(ya, len(y))), bytes(mu.mem_read(ca, len(c)))) for name, (ya, ca, y, c) in planes.items()}
+    if bytes(mu.mem_read(DESC, 0x80)) != descriptors_before:
+        sys.exit('picture descriptors changed')
+    if mu.reg_read(UC_ARM_REG_PC) != STUB + 0x100:
+        sys.exit('module did not return')
     if bytes(mu.mem_read(CTX, len(ctx))) != ctx:
         sys.exit('the context changed')
     return planes, got, n[0], heap[0] - HEAP
@@ -170,15 +177,36 @@ def main():
     same('screennail untouched', got['sn'][0] + got['sn'][1], bytes(planes['sn'][2]) + bytes(planes['sn'][3]))
     same('thumbnail untouched', got['th'][0] + got['th'][1], bytes(planes['th'][2]) + bytes(planes['th'][3]))
     changed = np.count_nonzero(np.frombuffer(got['main'][0], np.uint8) != np.frombuffer(bytes(planes['main'][2]), np.uint8))
-    print(f'     {changed} luma bytes changed; {instr / (mw * mh / 1e6) / 1e6:.0f} M instructions per megapixel; heap used {used / 1e6:.1f} MB')
+    print(f'     {changed} luma bytes changed; heap used {used / 1e6:.1f} MB; instruction instrumentation {"enabled" if instr else "disabled"}')
     if changed < mw * mh // 4:
         print('FAIL the picture was hardly changed')
         failures += 1
     for name, kw in (('no valid stash', dict(stash=35)), ('another film', dict(stash=0x10000 | 36)), ('film without the film MTF', dict(look_map=[0] * 64)),
-                     ('wrong magic', dict(magic=0x12345678)), ('another picture format', dict(fmt=2)), ('width not a multiple of 8', dict(main=(4090, 520))),
+                     ('wrong magic', dict(magic=0x12345678)), ('another picture format', dict(fmt=2)), ('odd 4:2:2 width', dict(main=(4091, 520))), ('bad stride', dict(stride=4095)),
                      ('heap too small', dict(heap_size=0x100000))):
         p2, g2, *_ = run(mix, data=(py, pc), **kw)
         same(f'{name}: nothing changes', g2['main'][0] + g2['main'][1], bytes(p2['main'][2]) + bytes(p2['main'][3]))
+    # Geometry and untouched right/bottom tails use the same non-flat fixture as the reference.
+    cases = [(3360, 520), (3000, 520), (5332, 524), (4800, 524), (960, 400)]
+    if '--full' in sys.argv:
+        cases = [(3360, 2240), (3000, 4000), (5332, 4000), (4800, 2700), (960, 1280)]
+    for mw, mh in cases:
+        bw, bh = ((mw + 95) & ~31), mh + 80
+        py, pc = picture(bw, bh, bw, 11)
+        ry, rc, info = reference(np.ascontiguousarray(py[40:40+mh, 32:]), np.ascontiguousarray(pc[40:40+mh, 32:]), mw, mh, bw-32)
+        assert info['ran'], (mw, mh)
+        for variant, extra in [('primary', {}), ('invalid-first valid-fallback', {'primary_invalid': True})]:
+            if variant != 'primary' and mw != 960:
+                continue
+            p2, g2, *_ = run(mix, data=(py, pc), main=(mw, mh), buf=(bw, bh), **extra)
+            for plane, wanted in [(0, ry), (1, rc)]:
+                full = bytearray(p2['main'][2+plane])
+                for row in range(mh):
+                    at = (40+row)*bw+32
+                    full[at:at+mw] = wanted[row,:mw].tobytes()
+                same(f'{mw}x{mh} {variant} plane{plane}, tails/padding/canaries', g2['main'][plane], bytes(full))
+            for name in ['sn','th']:
+                same(f'{mw}x{mh} {name} untouched', g2[name][0]+g2[name][1], bytes(p2[name][2])+bytes(p2[name][3]))
     sys.exit(1 if failures else 0)
 
 

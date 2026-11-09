@@ -21,4 +21,7 @@ export { GR3X_CAMERA } from './gr3x-camera';
 export { convertGr3xCube, convertGr3xXmp } from './gr3x-import';
 export { GRAIN_GAIN, grainRgb, grainSetting, grainTone, grainYC } from './grain';
 export type { Grain, GrainAmount, GrainSize } from './grain';
+export { aspectSpan, validTextureMain, textureReferenceSpan, textureGrainStep, textureRadiusSpan } from './texture-geometry';
+export type { TextureDimensions, TextureGeometry, TextureGeometryPolicy } from './texture-geometry';
+export { filmMtfPreviewApplies, filmMtfRgba } from './filmmtf';
 export { TEAL_SKY_MIX, TEAL_SKY_STEPS, tealSkyMix, withTealSky } from './sky';

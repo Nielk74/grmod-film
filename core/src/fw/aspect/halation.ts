@@ -30,6 +30,9 @@ import { FirmwareError } from '../types';
 import { assembleWords, branchTarget, movImmediate } from './arm';
 import { Patch, concat, u16le, u32le } from './build';
 import { HALATION_CODE, HALATION_CODE_LENGTH } from './halation-code';
+import { LEGACY_HALATION_CODE, LEGACY_HALATION_CODE_LENGTH } from '../picture-legacy-code';
+import { textureRadiusSpan } from '../../color/texture-geometry';
+import type { TextureGeometry } from '../../color/texture-geometry';
 
 /**
  * The look of the glow, the same for every look that has it: fitted to CineStill 800T pictures
@@ -179,9 +182,9 @@ export function halationLut(colour: HalationColour = 'red'): Uint8Array {
   return out;
 }
 
-export function halationModule(): Uint8Array {
-  const raw = Uint8Array.from(atob(HALATION_CODE), (c) => c.charCodeAt(0));
-  if (raw.length !== HALATION_CODE_LENGTH || raw.length % 4 !== 0) fail('internal', 'halation module length');
+export function halationModule(textureGeometry = false): Uint8Array {
+  const raw = Uint8Array.from(atob(textureGeometry ? HALATION_CODE : LEGACY_HALATION_CODE), (c) => c.charCodeAt(0));
+  if (raw.length !== (textureGeometry ? HALATION_CODE_LENGTH : LEGACY_HALATION_CODE_LENGTH) || raw.length % 4 !== 0) fail('internal', 'halation module length');
   return raw;
 }
 
@@ -403,9 +406,10 @@ const lift = (v: number, h: number): number => v + Math.floor(((255 - v) * h * 2
  * The module's computation (halation.c, `halate`) in TypeScript, on a YCbCr 4:2:2 picture (Y and
  * the interleaved CbCr plane, `w` bytes per row each), for GR Mod's preview. Same integer steps.
  */
-export function halateYcc(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight = PLAIN_LIGHT, colour: HalationColour = 'red'): void {
-  if (colour === 'white') halateYccWhite(Y, C, w, h, level, light);
-  else halateYccRed(Y, C, w, h, level, light, colour);
+export function halateYcc(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight = PLAIN_LIGHT, colour: HalationColour = 'red', geometry?: TextureGeometry): void {
+  if (!level || (w & 1)) return;
+  if (colour === 'white') halateYccWhite(Y, C, w, h, level, light, geometry);
+  else halateYccRed(Y, C, w, h, level, light, colour, geometry);
 }
 
 /**
@@ -413,7 +417,7 @@ export function halateYcc(Y: Uint8Array, C: Uint8Array, w: number, h: number, le
  * red, green and blue, each the light times that channel over the brightest one), and each channel
  * is lifted by its own map. A white lamp gives a white bloom, a red sign a red one.
  */
-function halateYccWhite(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight): void {
+function halateYccWhite(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight, geometry?: TextureGeometry): void {
   const P = paramBytes();
   const v = new DataView(P.buffer);
   const tab = light.table;
@@ -450,7 +454,8 @@ function halateYccWhite(Y: Uint8Array, C: Uint8Array, w: number, h: number, leve
   }
   const tmp = new Uint16Array(Math.max(sw, sh));
   const spread = (a: Uint16Array, rad: number): void => {
-    let r = (rad * sw + 2048) >>> 12;
+    const radiusSpan = geometry ? textureRadiusSpan(w, h, geometry, F) : sw;
+    let r = (rad * radiusSpan + 2048) >>> 12;
     if (r < 1) return;
     if (r > 200) r = 200;
     const recip = Math.floor(65536 / (2 * r + 1));
@@ -521,7 +526,7 @@ function halateYccWhite(Y: Uint8Array, C: Uint8Array, w: number, h: number, leve
   }
 }
 
-function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight, colour: 'red' | 'gold' | 'orange' = 'red'): void {
+function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level: HalationLevel, light: HalationLight, colour: 'red' | 'gold' | 'orange' = 'red', geometry?: TextureGeometry): void {
   const P = paramBytes();
   const v = new DataView(P.buffer);
   const tab = light.table;
@@ -551,7 +556,8 @@ function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level:
   }
   const tmp = new Uint16Array(Math.max(sw, sh));
   const spread = (a: Uint16Array, rad: number): void => {
-    let r = (rad * sw + 2048) >>> 12;
+    const radiusSpan = geometry ? textureRadiusSpan(w, h, geometry, F) : sw;
+    let r = (rad * radiusSpan + 2048) >>> 12;
     if (r < 1) return;
     if (r > 200) r = 200;
     const recip = Math.floor(65536 / (2 * r + 1));
@@ -621,7 +627,7 @@ function halateYccRed(Y: Uint8Array, C: Uint8Array, w: number, h: number, level:
 }
 
 /** Halation on an RGBA picture (sRGB, through YCbCr 4:2:2 as in the camera), in place; `light` of the slot (`halationLight`). */
-export function halateRgba(data: Uint8ClampedArray, width: number, height: number, level: HalationLevel, light: HalationLight = PLAIN_LIGHT, colour: HalationColour = 'red'): void {
+export function halateRgba(data: Uint8ClampedArray, width: number, height: number, level: HalationLevel, light: HalationLight = PLAIN_LIGHT, colour: HalationColour = 'red', geometry?: TextureGeometry): void {
   const w = width & ~1;
   if (w < 2 || height < 2) return;
   const Y = new Uint8Array(w * height), C = new Uint8Array(w * height);
@@ -638,7 +644,7 @@ export function halateRgba(data: Uint8ClampedArray, width: number, height: numbe
     C[y * w + x + 1] = Math.max(0, Math.min(255, Math.round(cr / 2)));
   }
   const before = Y.slice(), cbefore = C.slice();
-  halateYcc(Y, C, w, height, level, light, colour);
+  halateYcc(Y, C, w, height, level, light, colour, geometry);
   // Only the change is put back, so the rest of the picture keeps its full colour resolution.
   for (let y = 0; y < height; y++) for (let x = 0; x < w; x += 2) {
     const dcb = C[y * w + x] - cbefore[y * w + x], dcr = C[y * w + x + 1] - cbefore[y * w + x + 1];

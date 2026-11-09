@@ -13,7 +13,7 @@
  *     EXPAND), each band mixed by a 3x3 matrix (Q12, from the layers' gains) acting on (Y, Cb, Cr),
  *     recombined as out = A0 L0 + EXPAND(D1 L1 + EXPAND(D2 L2 + EXPAND(D3 L3)));
  *   - done in strips of 192 rows with 32 rows of margin, so it needs a few megabytes, not a picture copy;
- *   - the pictures it does not know (another format, a width under 4096 or not a multiple of 8, ...)
+ *   - the pictures it does not know (another format, a width under 960 or odd, ...)
  *     are left alone, and so is everything if memory is short.
  *
  * Which film: `stash` (written by the development step that reads the frame's record, see
@@ -56,7 +56,7 @@ struct ctx {
 #define MAGIC 0x3146544du
 #define STRIP 192u
 #define MARGIN 32u
-#define MIN_WIDTH 4096u
+#define MIN_WIDTH 960u
 
 static int ram(const void *p) {
   u32 a = (u32)p;
@@ -66,7 +66,7 @@ static int ram(const void *p) {
 static int picture_ok(const struct picture *p) {
   u32 w = p->width, h = p->height;
   if (p->format != 1 || !ram(p->y) || !ram(p->c) || w < MIN_WIDTH || h < 64 || p->stride < w || p->c_height < h) return 0;
-  return w <= 12000 && h <= 12000 && !(w & 7) && !(h & 7);
+  return w <= 12000 && h <= 12000 && !(w & 1);
 }
 
 static u8 clamp8(s32 v) { return (u8)(v < 0 ? 0 : v > 255 ? 255 : v); }
@@ -231,7 +231,10 @@ static void process(const struct ctx *k, const struct picture *p, struct work *w
 }
 
 static void film_mtf(const struct ctx *k, void *cache, const struct picture *p) {
-  u32 w = p->width, h = p->height, w1 = w >> 1, eh = STRIP + 2 * MARGIN, j;
+  u32 w = p->width & ~7u, h = p->height, w1 = w >> 1, eh = STRIP + 2 * MARGIN, j;
+  /* Local aligned view only: full descriptor and full-frame cache ranges remain unchanged. */
+  struct picture active = *p;
+  active.width = (u16)w; active.height = (u16)(h & ~7u);
   struct work wk;
   u32 a = (u32)p->y & ~63u, b = ((u32)p->y + h * p->stride + 63) & ~63u;
   u32 ca = (u32)p->c & ~63u, cb = ((u32)p->c + h * p->stride + 63) & ~63u;
@@ -248,7 +251,7 @@ static void film_mtf(const struct ctx *k, void *cache, const struct picture *p) 
   GET(wk.crow, u8 *, w);
   k->invalidate(cache, a, b - a);
   k->invalidate(cache, ca, cb - ca);
-  process(k, p, &wk);
+  process(k, &active, &wk);
   k->clean(cache, a, b - a);
   k->clean(cache, ca, cb - ca);
 fail:

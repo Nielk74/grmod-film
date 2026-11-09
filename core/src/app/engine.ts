@@ -254,10 +254,14 @@ export interface FirmwareSummary {
   tealHue?: boolean;
   /** GR III / IIIx: true when the films have the Grain row and gold Halation (BuildOptions.grainRow). */
   grainRow?: boolean;
+  /** Explicit crop texture geometry in the verified GR III / IIIx recipe. */
+  textureGeometry?: 'sensor' | 'output';
 }
 
 /** Additions besides the slots and the ratios. */
 export interface BuildOptions {
+  /** GR III / IIIx round 10: sensor-pitch crop texture or output-relative texture. Absent preserves legacy builds. */
+  textureGeometry?: 'sensor' | 'output';
   /** Put soft focus (off / weak / medium / strong) on the ADJ lever. */
   adjSoftFocus?: boolean;
   /** Date imprint on the JPEG, switched in the camera's menu. */
@@ -592,7 +596,8 @@ export class Engine {
         adjSoftFocus: matched && adjSoftFocus, dateStamp: matched && dateImprint, monoUnlock: matched && looks?.monoReplicas === true, extraSlots: [],
         ...(matched && pictures.length ? { shutdownPictures: pictures.map((p, k) => ({ id: p.id ?? k + 1, name: p.name, jpeg: p.jpeg })) } : {}),
         ...(matched && lookLayout ? { lookLayout: { order: [...lookLayout.order], hidden: [...lookLayout.hidden] } } : {}),
-        ...(matched && looks?.tealHue ? { tealHue: true } : {}), ...(matched && looks?.grainRow ? { grainRow: true } : {}) };
+        ...(matched && looks?.tealHue ? { tealHue: true } : {}), ...(matched && looks?.grainRow ? { grainRow: true } : {}),
+        ...(matched && looks?.textureGeometry !== undefined ? { textureGeometry: looks.textureGeometry } : {}) };
     }
     if (raw.length === BRIDGE_SIZE && sha256 === BRIDGE_SHA256) return { sha256, kind: 'bridge', changedBytes: 0, verified: true, slots: [], ratios: [], softFocus: [], adjSoftFocus: false, dateStamp: false, monoUnlock: false, extraSlots: [] };
     const describe = (d: Uint8Array): FirmwareSummary['slots'] =>
@@ -912,7 +917,7 @@ export class Engine {
   /** Build a firmware file. The result has passed the built-in self-check (otherwise this throws). */
   async buildFirmware(requests: SlotRequest[], ratios: readonly RatioSpec[] = [], softFocus: readonly SoftFocusRequest[] = [], options: BuildOptions = {}): Promise<FirmwareBuild> {
     if (this.info.family === 'gr3x') {
-      if (Object.entries(options).some(([k, v]) => k !== 'monoUnlock' && k !== 'adjSoftFocus' && k !== 'dateStamp' && k !== 'shutdownPictures' && k !== 'filmCount' && k !== 'tealHue' && k !== 'grainRow' && k !== 'guard' && k !== 'lookLayout' && k !== 'gr3Round' && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)))
+      if (Object.entries(options).some(([k, v]) => k !== 'monoUnlock' && k !== 'adjSoftFocus' && k !== 'dateStamp' && k !== 'shutdownPictures' && k !== 'filmCount' && k !== 'tealHue' && k !== 'grainRow' && k !== 'textureGeometry' && k !== 'guard' && k !== 'lookLayout' && k !== 'gr3Round' && v !== undefined && v !== false && !(Array.isArray(v) && !v.length)))
         throw new FirmwareError('gr3x-unsupported', 'added Image Control slots and the test settings of the date imprint are not ported to GR III / IIIx');
       if (options.shutdownPictures?.length && !this.info.capabilities.menuPictures)
         throw new FirmwareError('gr3x-unsupported', 'this GR III / IIIx file has no End Screen pictures');
@@ -922,6 +927,7 @@ export class Engine {
       const menu = planGr3xMenu(ratios.map(r => ({ ratio: r.ratio, name: r.name })));
       // 0: no films (as when nothing is chosen).
       const filmCount = options.filmCount || undefined;
+      if (options.textureGeometry !== undefined && (!['sensor', 'output'].includes(options.textureGeometry) || filmCount === undefined)) throw new FirmwareError('bad-edit', 'texture geometry needs a film count');
       if (options.tealHue && filmCount === undefined) throw new FirmwareError('bad-edit', 'the films\' teal sky needs a film count');
       if (options.grainRow && filmCount === undefined) throw new FirmwareError('bad-edit', 'the films\' Grain row needs a film count');
       if (options.filmCount === 0 && requests.length) throw new FirmwareError('bad-edit', 'film changes without films');
@@ -939,6 +945,7 @@ export class Engine {
         ...(filmCount !== undefined ? { filmCount } : {}),
         ...(options.tealHue && filmCount !== undefined ? { tealHue: true } : {}),
         ...(options.grainRow && filmCount !== undefined ? { grainRow: true } : {}),
+        ...(options.textureGeometry !== undefined ? { textureGeometry: options.textureGeometry } : {}),
         films: ids.map((slot, i) => {
           const r = requests.find(r => r.slot === slot);
           // Each camera language may have its own name. Languages without one show the default:
@@ -999,6 +1006,7 @@ export class Engine {
       if (!SOFT_FOCUS_STRENGTHS.includes(f.strength)) throw new FirmwareError('bad-clarity', `unknown soft focus strength ${String(f.strength)}`);
       return { level: f.level, gains: SOFT_FOCUS_GAINS[f.strength] };
     });
+    if (options.textureGeometry !== undefined) throw new FirmwareError('bad-edit', 'texture geometry is for GR III / IIIx films');
     const adjSoftFocus = !!(options && options.adjSoftFocus);
     const dateStamp = !!(options && options.dateStamp);
     const monoUnlock = !!(options && options.monoUnlock);

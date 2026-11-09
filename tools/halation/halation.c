@@ -75,7 +75,7 @@ struct ctx {
   const u8 *lut;
   const struct look *looks;
   u32 count;          /* entries of `looks` */
-  u32 reserved;
+  u32 reserved;       /* texture geometry: 0 legacy, 1 sensor, 2 output */
   struct params p;
   u32 magic;          /* 'HAL4' */
   u8 look_map[64];    /* style -> entry of `looks` + 1, 0: no halation */
@@ -110,7 +110,7 @@ static int ram(const void *p) {
 static int picture_ok(const struct picture *p) {
   u32 w = p->width, h = p->height;
   if (p->format != 1 || !ram(p->y) || !ram(p->c) || w < 64 || h < 48 || p->stride < w || p->c_height < h) return 0;
-  return w <= 12000 && h <= 12000;
+  return w <= 12000 && h <= 12000 && !(w & 1);
 }
 
 /* n / d for small numbers, by shift and subtract. */
@@ -150,8 +150,8 @@ static void box(u16 *v, u32 n, u32 step, u32 r, u32 recip, u16 *tmp) {
 }
 
 /* Three box passes each way, radius from `rad` (1/4096 of the width sw). */
-static void spread(u16 *v, u32 sw, u32 sh, u32 rad, u16 *tmp) {
-  u32 r = (rad * sw + 2048) >> 12, recip, pass, x, y;
+static void spread(u16 *v, u32 sw, u32 sh, u32 radius_span, u32 rad, u16 *tmp) {
+  u32 r = (rad * radius_span + 2048) >> 12, recip, pass, x, y;
   if (r < 1) return;
   if (r > 200) r = 200;
   recip = udiv(65536u, 2 * r + 1);
@@ -166,7 +166,16 @@ static s32 clamp8(s32 v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
 /* Lift a colour towards white by h (0..255 of 255). */
 static s32 lift(s32 v, u32 h) { return v + (s32)(((u32)(255 - v) * h * 257 + 32768) >> 16); }
 
-static void halate(const struct ctx *k, void *cache, const struct picture *p, u32 gain, const u16 *light) {
+static u32 span2(const struct picture *p) {
+  u32 w = 2u * p->width, h = 3u * p->height;
+  return w > h ? w : h;
+}
+
+static u32 radius_span(const struct ctx *k, const struct picture *p, u32 reference2, u32 F, u32 sw) {
+  return k->reserved ? udiv(udiv(6000u * span2(p), reference2) + F - 1, F) : sw;
+}
+
+static void halate(const struct ctx *k, void *cache, const struct picture *p, u32 gain, const u16 *light, u32 reference2) {
   const struct params *P = &k->p;
   const u8 *lr = k->lut, *lg = k->lut + LUT_N, *lb = k->lut + 2 * LUT_N;
   u32 w = p->width, h = p->height, s = 0, q, F, sw, sh, x, y, i, n;
@@ -208,8 +217,8 @@ static void halate(const struct ctx *k, void *cache, const struct picture *p, u3
 
   /* 2. the narrow and the wide spread, mixed */
   for (i = 0; i < n; i++) wide[i] = small[i];
-  spread(small, sw, sh, P->narrow, tmp);
-  spread(wide, sw, sh, P->wide, tmp);
+  spread(small, sw, sh, radius_span(k, p, reference2, F, sw), P->narrow, tmp);
+  spread(wide, sw, sh, radius_span(k, p, reference2, F, sw), P->wide, tmp);
   for (i = 0; i < n; i++) small[i] = (u16)((small[i] * P->mix + wide[i] * (256 - P->mix)) >> 8);
 
   /* 3. lift towards white by the table, bilinear from the small picture; per pair of pixels
@@ -266,7 +275,7 @@ out:
 }
 
 /* The white glow: as halate, with a map per channel. */
-static void halate_white(const struct ctx *k, void *cache, const struct picture *p, u32 gain, const u16 *light) {
+static void halate_white(const struct ctx *k, void *cache, const struct picture *p, u32 gain, const u16 *light, u32 reference2) {
   const struct params *P = &k->p;
   const u8 *lw = k->lut + 3 * LUT_N;
   u32 w = p->width, h = p->height, s = 0, q, F, sw, sh, x, y, i, n, c;
@@ -321,8 +330,8 @@ static void halate_white(const struct ctx *k, void *cache, const struct picture 
   for (c = 0; c < 3; c++) {
     u16 *m = map[c];
     for (i = 0; i < n; i++) wide[i] = m[i];
-    spread(m, sw, sh, P->narrow, tmp);
-    spread(wide, sw, sh, P->wide, tmp);
+    spread(m, sw, sh, radius_span(k, p, reference2, F, sw), P->narrow, tmp);
+    spread(wide, sw, sh, radius_span(k, p, reference2, F, sw), P->wide, tmp);
     for (i = 0; i < n; i++) m[i] = (u16)((m[i] * P->mix + wide[i] * (256 - P->mix)) >> 8);
   }
 
@@ -380,7 +389,7 @@ out:
 
 /* Entry: k = context, config = JpegEncodeMacroProcess configuration. */
 void halation(const struct ctx *k, u32 *config) {
-  u32 st = *k->stash, style, level, i, j, gain, e;
+  u32 st = *k->stash, style, level, i, j, gain, e, reference2 = 12000u;
   const struct look *look;
   struct picture *seen[4];
   void *cache;
@@ -419,6 +428,11 @@ void halation(const struct ctx *k, u32 *config) {
   if (!gain || k->p.mix > 256) return;
   for (i = 0; i < 256; i++) if (look->light[i] > E_MAX) return;
 #endif
+  /* Missing, invalid or preview-only primary: retain the output-relative reference. */
+  if (k->reserved == 1) {
+    const struct picture *main = (const struct picture *)config[0x3c >> 2];
+    if (ram(main) && picture_ok(main) && (main->width >= 1280 || main->height >= 1280)) reference2 = span2(main);
+  }
   cache = k->cache();
   /* One picture per buffer (another entry with the same planes describes the whole sensor). */
   for (i = 0; i < 4; i++) {
@@ -430,8 +444,8 @@ void halation(const struct ctx *k, u32 *config) {
   }
   for (i = 0; i < 4; i++) {
     if (!seen[i]) continue;
-    if (st & STASH_WHITE) halate_white(k, cache, seen[i], gain, look->light);
-    else halate(k, cache, seen[i], gain, look->light);
+    if (st & STASH_WHITE) halate_white(k, cache, seen[i], gain, look->light, reference2);
+    else halate(k, cache, seen[i], gain, look->light, reference2);
   }
 #ifdef STATUS
   if (seen[0] || seen[1] || seen[2] || seen[3]) *k->status = (*k->status & ~0xffu) | 8;

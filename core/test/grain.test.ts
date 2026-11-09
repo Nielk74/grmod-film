@@ -19,6 +19,41 @@ function testColour(stride: number, rows: number, salt: number): Uint8Array {
 }
 
 describe('film grain v2 (GR III films)', () => {
+  it('keeps grain in odd-width rotated RGB previews through an even 4:2:2 working plane', () => {
+    const w = 405, h = 720, channels = 4;
+    const geometry = { policy: 'sensor' as const, main: { width: 4800, height: 3200 }, picture: { width: 720, height: 405 } };
+    const storage = new Uint8ClampedArray(w * h * channels + 16).fill(201);
+    const actual = storage.subarray(8, storage.length - 8), padded = new Uint8Array((w + 1) * h * channels);
+    for (let y = 0; y < h; y++) for (let x = 0; x <= w; x++) {
+      padded.set([128, 128, 128, 201], (y * (w + 1) + x) * channels);
+      if (x < w) actual.set([128, 128, 128, 201], (y * w + x) * channels);
+    }
+    grainRgb(actual, w, h, 3, channels, 4800, geometry);
+    grainRgb(padded, w + 1, h, 3, channels, 4800, geometry);
+    expect(actual.some((v, i) => i % 4 !== 3 && v !== 128)).toBe(true);
+    for (let y = 0; y < h; y++) expect(actual.subarray(y * w * 4, (y + 1) * w * 4)).toEqual(new Uint8ClampedArray(padded.subarray(y * (w + 1) * 4, (y * (w + 1) + w) * 4)));
+    expect(actual.filter((_, i) => i % 4 === 3).every(v => v === 201)).toBe(true);
+    expect(storage.subarray(0, 8).every(v => v === 201)).toBe(true); expect(storage.subarray(storage.length - 8).every(v => v === 201)).toBe(true);
+    const Y = new Uint8Array(w * h).fill(128), C = Y.slice();
+    grainYC(Y, C, w, h, w, 3, 6000, geometry);
+    expect(Y.every(v => v === 128)).toBe(true); expect(C.every(v => v === 128)).toBe(true);
+  });
+  it('explicit sensor geometry preserves sensor-pitch grain in a crop; previews inherit the primary reference', () => {
+    const run = (w: number, h: number, geometry?: { policy: 'sensor' | 'output'; main?: { width: number; height: number } }) => {
+      const y = new Uint8Array(w * h).fill(128), c = y.slice();
+      grainYC(y, c, w, h, w, 2, 6000, geometry);
+      const rms = Math.sqrt(y.reduce((s, v) => s + (v - 128) ** 2, 0) / y.length);
+      return { y, c, rms };
+    };
+    const main = { width: 3360, height: 2240 };
+    const sensor = run(3360, 64, { policy: 'sensor', main });
+    const output = run(3360, 64, { policy: 'output', main });
+    expect(sensor.rms).toBeGreaterThan(3.5); expect(output.rms).toBeLessThan(2.5);
+    const preview = run(720, 480, { policy: 'sensor', main });
+    expect(preview.rms).toBeLessThan(1.2);
+    expect(preview.y).not.toEqual(run(720, 480).y);
+    expect(run(720, 480, { policy: 'sensor' }).y).toEqual(run(720, 480, { policy: 'output' }).y);
+  });
   it('is the computation the ARM module was checked against (tools/grain/check.py)', () => {
     const h = createHash('sha256');
     for (const setting of [1, 2, 3, 5, 6, 7]) {

@@ -27,16 +27,17 @@ const options = optionsFile ? JSON.parse(readFileSync(optionsFile, 'utf8')) : { 
 const engine = await Engine.open(raw);
 const built = await engine.buildFirmware(requests, GR3X_T4_CUSTOM.map(x => ({ ratio: x.ratio, name: x.name ?? x.ratio })), [], options);
 // The same build through the research builder, for its manifest (as Engine.fixedGr3x does, round 10).
-const looks = { displayRevision: 3 as const, monoReplicas: false, ownParameters: true, filmCount: options.filmCount, ...(options.tealHue ? { tealHue: true } : {}), ...(options.grainRow ? { grainRow: true } : {}),
+const looks = { displayRevision: 3 as const, monoReplicas: false, ownParameters: true, filmCount: options.filmCount, ...(options.tealHue ? { tealHue: true } : {}), ...(options.grainRow ? { grainRow: true } : {}), ...(options.textureGeometry ? { textureGeometry: options.textureGeometry } : {}),
   films: GR3X_FILM_IDS.slice(0, options.filmCount).map((id, i) => {
     const r = requests.find((q: { slot: string }) => q.slot === id);
-    return { name: r?.names?.en ?? GR3X_FILM_NAMES[i], ...(r?.preset ? { preset: r.preset } : {}), ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain?.amount ? { grain: r.grain } : {}) };
+    return { name: r?.names?.en ?? GR3X_FILM_NAMES[i], ...(r?.preset ? { preset: r.preset } : {}), ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain?.amount ? { grain: r.grain } : {}), ...(r?.filmMtf ? { filmMtf: true } : {}) };
   }) };
 const features = { adjSoftFocus: !!options.adjSoftFocus, ...(options.dateStamp ? { dateImprint: true, dateMenu: 'submenu' as const } : {}), round7: true, round8: true, round9: true, round10: true };
 const r = await buildGr3xTestFirmware(raw, [], looks, GR3X_T4_MENU, features);
 if (r.report.outputSha256 !== built.sha256) throw new Error('the research build is not the Engine build');
 mkdirSync(out, { recursive: true });
-const decoded = new Firmware(r.bytes).decoded;
+// NativeProbe verifies the exact official RTOS, then installs the manifest's sites and append.
+const decoded = new Firmware(raw).decoded;
 const rtos = sectionsOf(decoded).find(s => s.name === 'RTOS')!;
 writeFileSync(join(out, 'rtos.bin'), decoded.subarray(rtos.offset, rtos.offset + rtos.size));
 writeFileSync(join(out, 'manifest.json'), JSON.stringify(r.manifest));
@@ -46,6 +47,8 @@ writeFileSync(join(out, 'firmware.bin'), r.bytes);
 // strength 1 + k % 3, red for even films and white for odd ones (as build-t6.mjs).
 const { halateYcc, halationLight } = await import('../../core/src/fw/aspect/halation');
 const W = 320, H = 240, parts: Uint8Array[] = [];
+// This fixture's primary is preview-sized, so the new sensor policy must use the output fallback.
+const textureGeometry = options.textureGeometry ? { policy: options.textureGeometry } : undefined;
 for (let k = 0; k < options.filmCount; k++) {
   const level = 1 + (k % 3), white = k % 2 === 1;
   const Y = new Uint8Array(W * H), C = new Uint8Array(W * H);
@@ -54,7 +57,7 @@ for (let k = 0; k < options.filmCount; k++) {
     C[y * W + x] = 128 + ((Math.floor(x / 2) + y) % 40) - 20;
   }
   const look = (r.manifest as any).addedLooks[k];
-  halateYcc(Y, C, W, H, level as 1 | 2 | 3, look.quantizedCurves ? halationLight(look.quantizedCurves, look.postQ9) : halationLight(), white ? 'white' : 'red');
+  halateYcc(Y, C, W, H, level as 1 | 2 | 3, look.quantizedCurves ? halationLight(look.quantizedCurves, look.postQ9) : halationLight(), white ? 'white' : 'red', textureGeometry);
   const head = new Uint8Array(4); new DataView(head.buffer).setUint32(0, (32 + k) | level << 8 | (white ? 0x20000 : 0), true);
   parts.push(head, Y, C);
 }
@@ -67,7 +70,7 @@ if (options.grainRow) for (const [colour, bit] of [['gold', 0x40000], ['orange',
     C[y * W + x] = 128 + ((Math.floor(x / 2) + y) % 40) - 20;
   }
   const look = (r.manifest as any).addedLooks[k];
-  halateYcc(Y, C, W, H, level as 1 | 2 | 3, look.quantizedCurves ? halationLight(look.quantizedCurves, look.postQ9) : halationLight(), colour);
+  halateYcc(Y, C, W, H, level as 1 | 2 | 3, look.quantizedCurves ? halationLight(look.quantizedCurves, look.postQ9) : halationLight(), colour, textureGeometry);
   const head = new Uint8Array(4); new DataView(head.buffer).setUint32(0, (32 + k) | level << 8 | bit, true);
   parts.push(head, Y, C);
 }

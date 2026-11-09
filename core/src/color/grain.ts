@@ -8,6 +8,8 @@
  * brightness and colour, scaled by a brightness table.
  */
 import { GRAIN_COLOUR_TILES, GRAIN_LUMA_TILES, GRAIN_TILE_SIZE, GRAIN_TONES } from './grain-tables';
+import { textureGrainStep } from './texture-geometry';
+import type { TextureGeometry } from './texture-geometry';
 
 export type GrainAmount = 0 | 1 | 2 | 3;
 export type GrainSize = 'small' | 'large';
@@ -51,10 +53,11 @@ const clamp8 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
  * the picture's width decides the grain's scale).
  */
 export function grainYC(Y: Uint8Array | Uint8ClampedArray, C: Uint8Array | Uint8ClampedArray, w: number, h: number, stride: number,
-  setting: number, fullWidth = FULL_WIDTH): void {
+  setting: number, fullWidth = FULL_WIDTH, geometry?: TextureGeometry): void {
   const amount = setting & 3, size = (setting >> 2) & 1;
   if (!amount) return;
-  const step = Math.floor((fullWidth * 256) / w) >>> 0;
+  if (geometry && (w & 1)) return;
+  const step = (geometry ? textureGrainStep(w, h, geometry) : Math.floor((fullWidth * 256) / w)) >>> 0;
   const att = step > 256 ? Math.floor(65536 / step) : 256;
   const gain = (GRAIN_GAIN[amount - 1] * att) >> 8;
   if (!gain) return;
@@ -85,8 +88,20 @@ export function grainYC(Y: Uint8Array | Uint8ClampedArray, C: Uint8Array | Uint8
  * `span`: how many pixels of the camera's 6000-wide picture the preview's width shows (6000: the
  * whole photo, as the camera's JPEG scaled down; the preview's own width: a 100% crop).
  */
-export function grainRgb(rgb: Uint8Array | Uint8ClampedArray, w: number, h: number, setting: number, channels = 3, span = FULL_WIDTH): void {
+export function grainRgb(rgb: Uint8Array | Uint8ClampedArray, w: number, h: number, setting: number, channels = 3, span = FULL_WIDTH, geometry?: TextureGeometry): void {
   if (!(setting & 3)) return;
+  if (geometry && (w & 1)) {
+    // RGB previews may have an odd width after display rotation. Give 4:2:2 a complete final
+    // pair, replicating the last RGB pixel, while retaining the represented picture's span.
+    const pitch = (w + 1) * channels, padded = new Uint8Array(pitch * h);
+    for (let y = 0; y < h; y++) {
+      padded.set(rgb.subarray(y * w * channels, (y + 1) * w * channels), y * pitch);
+      padded.set(rgb.subarray(((y + 1) * w - 1) * channels, (y + 1) * w * channels), y * pitch + w * channels);
+    }
+    grainRgb(padded, w + 1, h, setting, channels, span, { ...geometry, picture: geometry.picture ?? { width: w, height: h } });
+    for (let y = 0; y < h; y++) rgb.set(padded.subarray(y * pitch, y * pitch + w * channels), y * w * channels);
+    return;
+  }
   const n = w * h, Y = new Uint8Array(n), C = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     const o = i * channels, r = rgb[o], g = rgb[o + 1], b = rgb[o + 2];
@@ -98,7 +113,7 @@ export function grainRgb(rgb: Uint8Array | Uint8ClampedArray, w: number, h: numb
     }
   }
   const Y0 = Y.slice(), C0 = C.slice();
-  grainYC(Y, C, w, h, w, setting, span);
+  grainYC(Y, C, w, h, w, setting, span, geometry);
   for (let i = 0; i < n; i++) {
     const x = i % w, p = x & 1 ? i - 1 : i;
     const dy = Y[i] - Y0[i], dcb = C[p] - C0[p], dcr = p + 1 < (i - x) + w ? C[p + 1] - C0[p + 1] : 0;

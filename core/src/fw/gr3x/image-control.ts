@@ -90,6 +90,8 @@ export interface Gr3xLookOptions {
    * camera (Off / 1 / 2 / 3, starting from its recipe's amount; the size is the recipe's), and the
    * Halation has a third colour, gold. Both live in the film's Toning byte with the Halation. */
   grainRow?: boolean;
+  /** Explicit crop texture geometry, versioned by its presence in the serialized recipe. */
+  textureGeometry?: 'sensor' | 'output';
 }
 /** Round 7: a film's fingerprint (FNV-1a over its matrix, curves and post-curve matrix as built;
  * never 0, which an empty table holds): a film whose preset changed starts again from neutral. */
@@ -214,6 +216,8 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
   if (round9 && !round8) throw new FirmwareError('bad-edit', 'IIIx round 9 builds on round 8');
   // Round 10 (films-r10.ts): the films as looks of their own, GR IV's way.
   const round10 = features.round10 === true;
+  if (options.textureGeometry !== undefined && (!['sensor', 'output'].includes(options.textureGeometry) || !round10 || options.filmCount === undefined))
+    throw new FirmwareError('bad-edit', 'IIIx texture geometry needs round 10 films');
   if (round10 && !round9) throw new FirmwareError('bad-edit', 'IIIx round 10 builds on round 9');
   if (round6 && (!extended || options.ownParameters !== true || options.jpegDiagnostics || !Number.isInteger(options.filmCount) ||
       options.filmCount! < 1 || options.filmCount! > GR3X_MAX_FILMS || options.films?.some(f => f.halation !== undefined)))
@@ -605,6 +609,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     ...(grainRow ? { grain: { settings: films.map(f => f.grain?.size === 'large' ? 4 : 0), camera: true } }
       : grains ? { grain: { settings: films.map(f => grainSetting(f.grain)) } } : {}),
     ...(filmMtf ? { filmMtf: { films: films.map(f => f.filmMtf === true) } } : {}),
+    ...(options.textureGeometry !== undefined ? { textureGeometry: options.textureGeometry } : {}),
   });
   // Round 10: the film's record comes from the descriptor's own table (films-r10.ts).
   const descriptor = round10 ? undefined : code(`push {r1-r3,ip};ldrb r2,[r7,#0x77c];` +
@@ -639,6 +644,7 @@ export async function buildGr3xImageControls(raw: Uint8Array, options: Gr3xLookO
     ...(round9 ? { round9: true } : {}),
     ...(round10 ? { round10: true } : {}),
     ...(grainRow ? { grainRow: true } : {}),
+    ...(options.textureGeometry !== undefined ? { textureGeometry: options.textureGeometry } : {}),
     ...(round8 ? { round8: true, ...(features.lookLayout && !isGr3xFactoryLayout(features.lookLayout, capacity) ? { lookLayout: { order: [...features.lookLayout.order], hidden: [...features.lookLayout.hidden] } } : {}) } : {}),
     // sharedParameters: films use Standard's storage (T6c). ownParameters: on top of it, each film's
     // values are swapped into that storage when it is selected (T6d).

@@ -12,8 +12,8 @@ With every patch of the manifest installed:
     The configuration and the picture descriptors lie below 0x5d000000, as on the camera (part of a
     process object; the first diagnostic build refused them there and printed nothing).
     With GR Mod's film recipes (round 10, grain): after the halation the grain module changes the
-    brightness exactly as tools/grain/check.py's reference for films with grain (the setting read
-    from the built context), the colour plane not at all, and leaves other looks alone.
+    brightness and chroma exactly as tools/grain/check.py's reference for films with grain
+    (the setting and geometry mode read from the built context), and leaves other looks alone.
   - diagnostic builds: the halation module's status word for every look (film with halation:
     done, one picture; others: why it stopped; format byte and refusal of the first picture), the
     stash and status printed in row 0 of a 720-wide picture, and nothing written into planes below
@@ -43,12 +43,17 @@ def u32(uc,a):return struct.unpack('<I',uc.mem_read(a,4))[0]
 
 class StageProbe(LookProbe):
     def __init__(self,data,manifest):
+        self.original_end=manifest['append']['address']
         super().__init__(data,manifest)
         for base,size in ((0x55800000,0x100000),(0x62c00000,0x200000),(IMG,0x200000),(HEAP,0x800000),(LOWIMG,0x200000)):
             try:self.uc.mem_map(base,size)
             except Exception:pass
         self.log={'invalidate':0,'clean':0,'alloc':[],'free':0,'time':0};self.heap=HEAP
         self.uc.hook_add(UC_HOOK_CODE,self._stage,begin=0x536af000,end=0x536be000)
+    def _hook(self,cpu,at,size,user):
+        # Inherited service hooks match only original firmware addresses. Texture modules are
+        # pure compute in the append, so avoid the full Python service dispatch for each pixel.
+        if at<self.original_end:super()._hook(cpu,at,size,user)
     def _stage(self,cpu,at,size,user):
         ret=lambda v=None:(v is not None and cpu.reg_write(reg.UC_ARM_REG_R0,v),cpu.reg_write(reg.UC_ARM_REG_PC,cpu.reg_read(reg.UC_ARM_REG_LR)))
         if at==INVALIDATE:self.log['invalidate']+=1;ret()
@@ -207,21 +212,25 @@ def verify(data,manifest,reference=None,quick=False):
             # Round 7: the stash words of the reference (film 32 + k, strength, white) as they are,
             # every film Off, another strength and colour, a native look and looks without halation.
             results={}
-            # Grain (round 10 recipes): the film's setting from the built context (look map at +44).
-            jp=entries['jpeg'];grain_map=bytes(n.uc.mem_read(jp['grainContext']+44,64)) if 'grainContext' in jp else bytes(64)
+            # Grain v2: 28-byte header, three u16 gains plus padding, then magic; look map at +40.
+            jp=entries['jpeg'];grain_map=bytes(n.uc.mem_read(jp['grainContext']+40,64)) if 'grainContext' in jp else bytes(64)
             # The Grain row: the amount is the stash's (bits 19..20), the size the build's (the
             # contexts' look maps hold size | amount).
             camera='grainContexts' in jp
             def setting(word):
-                if (word&0xff)>=64:return 0
+                if (word&0xff)>=64 or not grain_map[word&0xff]:return 0
                 if not camera:return grain_map[word&0xff]
                 a=(word>>19)&3
                 return (grain_map[word&0xff]&4)|a if a else 0
             if 'grainContext' in jp:
                 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'grain'))
                 from check import reference as grain_reference
-                def with_grain(plane,setting):
-                    b=bytearray(plane);grain_reference(b,w,h,w,setting);return bytes(b)
+                grain_mode=struct.unpack('<H',n.uc.mem_read(jp['grainContext']+34,2))[0]
+                def with_grain(plane,colour,setting):
+                    b,c=bytearray(plane),bytearray(colour)
+                    # The fixture has a preview-sized primary, so new sensor jobs fall back to output.
+                    grain_reference(b,c,w,h,w,setting,grain_mode,None)
+                    return bytes(b),bytes(c)
             words=[(11,False),(11|3<<8|0x20000,False),((32+round6)|2<<8,False),(63|1<<8,False),(31|3<<8,False)]
             # --quick: the first three films only (every film runs the same code; only its light differs).
             nf=min(3,round6) if quick else round6
@@ -237,10 +246,10 @@ def verify(data,manifest,reference=None,quick=False):
                 g=setting(word);base=word&~0x180000
                 if base in expected:
                     ey,ec=expected[base][:2]
-                    assert (Y,C)==((with_grain(ey,g) if g&3 else ey),ec),hex(word)
-                elif g&3 and not changes:assert (Y,C)==(with_grain(y,g),c),hex(word)
+                    assert (Y,C)==(with_grain(ey,ec,g) if g&3 else (ey,ec)),hex(word)
+                elif g&3 and not changes:assert (Y,C)==with_grain(y,c,g),hex(word)
                 # On this small picture weak grain can average out to nothing (as on the thumbnail).
-                visible=bool(g&3) and with_grain(y,g)!=y
+                visible=bool(g&3) and with_grain(y,c,g)!=(y,c)
                 if visible:grained+=1
                 if changes or visible:assert Y!=y and len(n.log['alloc'])>0,hex(word)
                 else:assert (Y,C)==(y,c),hex(word)

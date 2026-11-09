@@ -30,9 +30,9 @@ from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_SP, UC_ARM_REG_LR
 
 ROOT = Path(__file__).resolve().parents[2]
-TS = (ROOT / 'core/src/fw/gr3x/grain-code.ts').read_text()
+TS = (ROOT / 'core/src/fw/gr3x/grain-code.ts').read_text(encoding='utf-8')
 CODE = base64.b64decode(re.search(r"GRAIN_CODE = '([^']+)'", TS).group(1))
-TABLES = (ROOT / 'core/src/color/grain-tables.ts').read_text()
+TABLES = (ROOT / 'core/src/color/grain-tables.ts').read_text(encoding='utf-8')
 
 
 def blobs(name):
@@ -58,12 +58,15 @@ def offset(i, j, seed):
     return (h & 0x7F7F).astype(np.int64)
 
 
-def reference(Y, C, w, h, stride, setting):
+def reference(Y, C, w, h, stride, setting, mode=0, main=None):
     """Y, C: bytearrays of the planes (rows `stride` apart), changed in place."""
     amount, size = setting & 3, (setting >> 2) & 1
     if not amount:
         return
-    step = (6000 << 8) // w
+    reference2 = 12000
+    if mode == 1 and main and max(main) >= 1280:
+        reference2 = max(2 * main[0], 3 * main[1])
+    step = (reference2 << 8) // max(2 * w, 3 * h) if mode else (6000 << 8) // w
     att = 65536 // step if step > 256 else 256
     gain = (GAIN[amount - 1] * att) >> 8
     if not gain:
@@ -111,19 +114,20 @@ MAIN_Y, MAIN_C, SN_Y, SN_C, TH_Y, TH_C = 0x80000000, 0x84000000, 0x90000000, 0x9
 BUF_W, BUF_H = 2464, 1700
 
 
-def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
+def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600), mode=0, primary="valid", heap_limit=0x400000):
+    bw, bh = main[0] + 64, main[1] + 100
     mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     mu.mem_map(CODE_AT, 0x10000)
     mu.mem_write(CODE_AT, CODE)
     for base, size in ((CTX, 0x10000), (STUB, 0x1000), (STACK - 0x10000, 0x10000), (HEAP, 0x400000), (TILES, 0x20000)):
         mu.mem_map(base, size)
-    mu.mem_map(MAIN_Y, (BUF_W * BUF_H + 0xFFF) & ~0xFFF)
-    mu.mem_map(MAIN_C, (BUF_W * BUF_H + 0xFFF) & ~0xFFF)
+    mu.mem_map(MAIN_Y, (bw * bh + 0xFFF) & ~0xFFF)
+    mu.mem_map(MAIN_C, (bw * bh + 0xFFF) & ~0xFFF)
     mu.mem_map(SN_Y, 0x200000)
     mu.mem_map(TH_Y, 0x20000)
     mw, mh = main
     planes = {
-        'main': (MAIN_Y, MAIN_C, test_picture(BUF_W, BUF_H, BUF_W, 11), test_colour(BUF_W, BUF_H, 1), BUF_W, BUF_H),
+        'main': (MAIN_Y, MAIN_C, test_picture(bw, bh, bw, 11), test_colour(bw, bh, 1), bw, bh),
         'sn': (SN_Y, SN_C, test_picture(720, 480, 736, 22), test_colour(736, 480, 2), 736, 480),
         'th': (TH_Y, TH_C, test_picture(160, 120, 160, 33), test_colour(160, 120, 3), 160, 120),
     }
@@ -131,7 +135,7 @@ def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
         mu.mem_write(ya, bytes(plane))
         mu.mem_write(ca, bytes(colour))
     ox, oy = 32, 50
-    main_y = MAIN_Y + oy * BUF_W + ox
+    main_y = MAIN_Y + oy * bw + ox
     for i in range(5):
         mu.mem_write(STUB + i * 16, struct.pack('<I', 0xE12FFF1E))  # bx lr
     heap = [HEAP]
@@ -142,7 +146,7 @@ def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
             uc.reg_write(UC_ARM_REG_R0, 0x553A09C4)
         if i == 3:
             n = (uc.reg_read(UC_ARM_REG_R0) + 63) & ~63
-            uc.reg_write(UC_ARM_REG_R0, heap[0])
+            uc.reg_write(UC_ARM_REG_R0, heap[0] if heap[0] + n <= HEAP + heap_limit else 0)
             heap[0] += n
     mu.hook_add(UC_HOOK_CODE, hook, begin=STUB, end=STUB + 0x50)
     mu.mem_write(TONE_AT, TONES[0] + TONES[1])
@@ -151,17 +155,18 @@ def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
         mu.mem_write(at, data)
     mu.mem_write(STASH, struct.pack('<I', stash))
     ctx = struct.pack('<7I', *(STUB + i * 16 for i in range(5)), STASH, TONE_AT) + \
-        struct.pack('<3H2xI', *GAIN, magic) + bytes(look_map) + struct.pack('<4I', *tile_at)
+        struct.pack('<4HI', *GAIN, mode, magic) + bytes(look_map) + struct.pack('<4I', *tile_at)
     mu.mem_write(CTX, ctx)
 
-    def desc(a, yp, cp, w, h, stride, ch):
-        mu.mem_write(a, struct.pack('<B3xIII HHHH HH 4x', fmt, yp, cp, 0, w, h, stride, ch, 0, 0))
-    desc(DESC, main_y, MAIN_C + oy * BUF_W + ox, mw, mh, BUF_W, BUF_H)
+    def desc(a, yp, cp, w, h, stride, ch, form=fmt):
+        mu.mem_write(a, struct.pack('<B3xIII HHHH HH 4x', form, yp, cp, 0, w, h, stride, ch, 0, 0))
+    desc(DESC, main_y, MAIN_C + oy * bw + ox, mw, mh, bw, bh, 2 if primary == "invalid" else fmt)
     desc(DESC + 0x20, SN_Y, SN_C, 720, 480, 736, 480)
     desc(DESC + 0x40, TH_Y, TH_C, 160, 120, 160, 120)
     # A fourth entry describing the main picture's planes again (the whole sensor): skipped.
-    desc(DESC + 0x60, main_y, MAIN_C + oy * BUF_W + ox, mw, mh, BUF_W, BUF_H)
-    mu.mem_write(CONFIG + 0x3C, struct.pack('<4I', DESC, DESC + 0x20, DESC + 0x40, DESC + 0x60))
+    desc(DESC + 0x60, main_y, MAIN_C + oy * bw + ox, mw + 32 if primary == "valid" else mw, mh, bw, bh)
+    mu.mem_write(CONFIG + 0x3C, struct.pack('<4I', 0 if primary == 'missing' else DESC + 0x20 if primary == 'preview' else DESC, DESC + 0x20, DESC + 0x40, DESC + 0x60))
+    descriptors_before = bytes(mu.mem_read(DESC, 0x80))
     mu.reg_write(UC_ARM_REG_SP, STACK)
     mu.reg_write(UC_ARM_REG_LR, STUB + 0x100)
     mu.reg_write(UC_ARM_REG_R0, CTX)
@@ -169,6 +174,8 @@ def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
     mu.emu_start(CODE_AT, STUB + 0x100, count=8_000_000_000)
     got = {name: (bytearray(mu.mem_read(ya, len(plane))), bytearray(mu.mem_read(ca, len(colour))))
            for name, (ya, ca, plane, colour, stride, rows) in planes.items()}
+    if bytes(mu.mem_read(DESC, 0x80)) != descriptors_before:
+        sys.exit('descriptors changed')
     if bytes(mu.mem_read(CTX, len(ctx))) != ctx:
         sys.exit('the context changed')
     for at, data in zip(tile_at, LUMA + COLOUR):
@@ -177,7 +184,8 @@ def run(stash, look_map, magic=MAGIC, fmt=1, main=(2400, 1600)):
     return planes, got, (ox, oy, mw, mh)
 
 
-def expected(planes, setting, window):
+def expected(planes, setting, window, mode=0, primary="valid"):
+    main = window[2:] if primary == "valid" else None
     ox, oy, mw, mh = window
     out = {}
     for name, (ya, ca, plane, colour, stride, rows) in planes.items():
@@ -185,12 +193,12 @@ def expected(planes, setting, window):
         if name == 'main':
             at = oy * stride + ox
             sy, sc = bytearray(p[at:]), bytearray(c[at:])
-            reference(sy, sc, mw, mh, stride, setting)
+            reference(sy, sc, mw, mh, stride, setting, mode, main)
             p[at:], c[at:] = sy, sc
         elif name == 'sn':
-            reference(p, c, 720, 480, stride, setting)
+            reference(p, c, 720, 480, stride, setting, mode, main)
         else:
-            reference(p, c, 160, 120, stride, setting)
+            reference(p, c, 160, 120, stride, setting, mode, main)
         out[name] = (p, c)
     return out
 
@@ -198,21 +206,22 @@ def expected(planes, setting, window):
 def main():
     failures = 0
     look = 32 + 3          # film 4
-    for setting in (1, 2, 3, 5, 6, 7):
-        lm = bytearray(64)
-        lm[look] = setting
-        planes, got, window = run(look | 0x10000 | (2 << 8), lm)
-        want = expected(planes, setting, window)
-        for name in got:
-            for k, label in ((0, 'Y'), (1, 'C')):
-                before = planes[name][2 + k]
-                changed = sum(1 for a, b in zip(before, got[name][k]) if a != b)
-                if got[name][k] != want[name][k]:
-                    bad = next(i for i, (a, b) in enumerate(zip(got[name][k], want[name][k])) if a != b)
-                    print(f'setting {setting} {name} {label}: MISMATCH at byte {bad}: {got[name][k][bad]} != {want[name][k][bad]}')
-                    failures += 1
-                else:
-                    print(f'setting {setting} {name} {label}: identical ({changed} bytes changed)')
+    for mode in (0, 1, 2):
+        for setting in (1, 2, 3, 5, 6, 7):
+            lm = bytearray(64)
+            lm[look] = setting
+            planes, got, window = run(look | 0x10000 | (2 << 8), lm, mode=mode)
+            want = expected(planes, setting, window, mode)
+            for name in got:
+                for k, label in ((0, 'Y'), (1, 'C')):
+                    before = planes[name][2 + k]
+                    changed = sum(1 for a, b in zip(before, got[name][k]) if a != b)
+                    if got[name][k] != want[name][k]:
+                        bad = next(i for i, (a, b) in enumerate(zip(got[name][k], want[name][k])) if a != b)
+                        print(f'mode {mode} setting {setting} {name} {label}: MISMATCH at byte {bad}: {got[name][k][bad]} != {want[name][k][bad]}')
+                        failures += 1
+                    else:
+                        print(f'mode {mode} setting {setting} {name} {label}: identical ({changed} bytes changed)')
     nothing = [
         ('no stash', 0, MAGIC, 1),
         ('stash without valid bit', look, MAGIC, 1),
@@ -227,6 +236,20 @@ def main():
         same = all(got[n][0] == planes[n][2] and got[n][1] == planes[n][3] for n in got)
         print(f'{label}: {"unchanged" if same else "CHANGED"}')
         failures += 0 if same else 1
+    lm = bytearray(64); lm[look] = 6
+    for primary in ['missing', 'invalid', 'preview']:
+        planes, got, window = run(look | 0x10000, lm, mode=1, primary=primary, main=(1280, 64))
+        want = expected(planes, 6, window, 1, primary)
+        assert got == want, f'{primary} primary must use output reference and process valid fallback'
+        print(f'{primary} primary: output reference with valid fallback, buffers identical')
+    planes, got, _ = run(look | 0x10000, lm, mode=1, heap_limit=0, main=(1280, 64))
+    assert all(got[n] == (planes[n][2], planes[n][3]) for n in got), 'allocation failure wrote buffers'
+    print('allocation failure: all buffers unchanged')
+    for main in [(1280, 1280), (960, 1280), (640, 1280)]:
+        for mode in [1, 2]:
+            planes, got, window = run(look | 0x10000, lm, mode=mode, main=main)
+            assert got == expected(planes, 6, window, mode), (main, mode)
+        print(f'{main} square/portrait main: both policies match, previews inherit primary')
     # The fixed picture of core/test/grain.test.ts: 600 x 400, stride 608, every setting.
     h = hashlib.sha256()
     for setting in (1, 2, 3, 5, 6, 7):

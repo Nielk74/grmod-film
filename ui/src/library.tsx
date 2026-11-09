@@ -1,15 +1,17 @@
 // GR Mod's film library (GR III / IIIx films), their recipes, and the preview's sample photos.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { filmpack } from '@grmod/core';
-import type { PresetResult, SlotId } from '@grmod/core';
-import { FileButton, Ico, IconCanvas, Segmented, useDismiss } from './components';
+import type { CameraModel, FirmwareInfo, PresetResult, SlotId } from '@grmod/core';
+import { FileButton, Ico, IconCanvas, Segmented, Select, Switch, useDismiss } from './components';
 import { engine } from './engine';
 import { t } from './i18n';
 import type { Key } from './i18n';
 import { applySlot } from './preview';
 import { SAMPLES } from './samples';
-import { halationOf, loadPresetFile, previewPhoto, recipeOf, setHalation, setRecipe, setSample, useLibraryFilm, useStore } from './store';
-import type { HaloColour, RecipeState } from './store';
+import { APPROVED_GOLD_ID, APPROVED_GOLD_NAME, APPROVED_GOLD_ATTRIBUTION, APPROVED_GOLD_LICENSE, createApprovedGold, isApprovedGoldIntent, supportsApprovedGold } from './approved-gold';
+import type { UiPresetResult } from './approved-gold';
+import { getState, halationOf, loadPresetFile, previewPhoto, recipeOf, reuseTexture, setHalation, setRecipe, setSample, textureReuseChoices, textureReuseSupported, useLibraryFilm, useStore } from './store';
+import type { HaloColour, RecipeState, SlotState } from './store';
 
 const GROUPS: { id: filmpack.LookGroup; label: Key }[] = [
   { id: 'fujifilm', label: 'groupFujifilm' }, { id: 'stock', label: 'groupStock' }, { id: 'oppo', label: 'groupOppo' }, { id: 'creative', label: 'groupCreative' },
@@ -22,6 +24,13 @@ function fitOf(look: filmpack.Look): Promise<PresetResult> {
   let f = fits.get(look.name);
   if (!f) { f = engine.convert('cube', filmpack.cubeText(look)); fits.set(look.name, f); f.catch(() => fits.delete(look.name)); }
   return f;
+}
+
+/** The optional branch never enters the authored CUBE/fit cache. */
+export async function libraryPreview(identity: string, info: FirmwareInfo | undefined, model: CameraModel): Promise<UiPresetResult | undefined> {
+  if (isApprovedGoldIntent(identity)) return identity === APPROVED_GOLD_ID ? createApprovedGold(info, model) : undefined;
+  const look = filmpack.LOOKS.find(l => l.name === identity);
+  return look ? fitOf(look) : undefined;
 }
 
 const THUMB_W = 192;
@@ -39,22 +48,23 @@ function useSmallPhoto(): ImageData | null {
   }, [rev]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-function Thumb({ look, photo }: { look: filmpack.Look; photo: ImageData | null }) {
+function Thumb({ identity, photo, info, model }: { identity: string; photo: ImageData | null; info: FirmwareInfo | undefined; model: CameraModel }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [ready, setReady] = useState(false);
+  const [rendered, setRendered] = useState<{ identity: string; photo: ImageData; info: FirmwareInfo | undefined; model: CameraModel }>();
+  const ready = !!rendered && rendered.identity === identity && rendered.photo === photo && rendered.info === info && rendered.model === model;
   useEffect(() => {
     let live = true;
-    setReady(false);
+    setRendered(undefined);
     if (!photo) return;
-    void fitOf(look).then((r) => {
+    void libraryPreview(identity, info, model).then((r) => {
       const c = ref.current;
-      if (!live || !c) return;
+      if (!live || !c || !r) return;
       const out = applySlot(r.params, photo, true);
       c.width = out.width; c.height = out.height; c.getContext('2d')!.putImageData(out, 0, 0);
-      setReady(true);
+      setRendered({ identity, photo, info, model });
     }).catch(() => undefined);
     return () => { live = false; };
-  }, [look, photo]);
+  }, [identity, photo, info, model]);
   return <canvas ref={ref} className={`lib-thumb ${ready ? 'ready' : ''}`} style={{ aspectRatio: photo ? `${photo.width} / ${photo.height}` : '3 / 2' }} />;
 }
 
@@ -62,7 +72,10 @@ function Thumb({ look, photo }: { look: filmpack.Look; photo: ImageData | null }
 export function LibraryDialog({ slot, onClose }: { slot: SlotId; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(true, ref, onClose);
-  const tile = useStore((s) => s.info?.tiles.film);
+  const info = useStore(s => s.info);
+  const model = useStore(s => s.model);
+  const tile = info?.tiles.film;
+  const eligible = supportsApprovedGold(info, model);
   const current = useStore((s) => s.slots[slot]?.preset?.library);
   const photo = useSmallPhoto();
   const [query, setQuery] = useState('');
@@ -88,7 +101,7 @@ export function LibraryDialog({ slot, onClose }: { slot: SlotId; onClose: () => 
                 <div className="lib-grid">
                   {looks.map((l) => (
                     <button key={l.name} className={`lib-card ${current === l.name ? 'on' : ''}`} onClick={() => pick(l.name)} title={l.about}>
-                      <Thumb look={l} photo={photo} />
+                      <Thumb identity={l.name} photo={photo} info={info} model={model} />
                       <span className="lib-meta">
                         {icons.get(l.name) && <IconCanvas pixels={icons.get(l.name)!} scale={1} />}
                         <span className="lib-text"><b className="ellipsis">{l.name}</b><span className="lib-about">{l.about}</span></span>
@@ -99,6 +112,15 @@ export function LibraryDialog({ slot, onClose }: { slot: SlotId; onClose: () => 
               </section>
             );
           })}
+          {(eligible || isApprovedGoldIntent(current)) && (!q || (APPROVED_GOLD_NAME + ' ' + t('approvedGoldAbout')).toLowerCase().includes(q)) && <section className="lib-group">
+            <h3>{t('approvedGoldGroup')}</h3>
+            <div className="lib-grid"><button className={`lib-card ${current === APPROVED_GOLD_ID ? 'on' : ''}`} disabled={!eligible} onClick={() => pick(APPROVED_GOLD_ID)} title={t(eligible ? 'approvedGoldAbout' : 'approvedGoldUnavailable')}>
+              <Thumb identity={APPROVED_GOLD_ID} photo={photo} info={info} model={model} />
+              <span className="lib-meta"><span className="lib-text"><b className="ellipsis">{APPROVED_GOLD_NAME}</b><span className="lib-about">{t('approvedGoldAbout')}</span></span></span>
+            </button></div>
+            {!eligible && <p className="small">{t('approvedGoldUnavailable')}</p>}
+            <p className="small" style={{ overflowWrap: 'anywhere', userSelect: 'text' }}>{t('approvedGoldAttribution')} {APPROVED_GOLD_ATTRIBUTION}<br />{APPROVED_GOLD_LICENSE}</p>
+          </section>}
         </div>
       </div>
     </div>
@@ -124,6 +146,7 @@ const HALO_LABEL: Key[] = ['haloOff', 'haloWeak', 'haloMedium', 'haloStrong'];
 /** What a recipe holds, in one line (only what differs from neutral). */
 function summary(r: RecipeState, halo: number, colour: HaloColour): string {
   const parts: string[] = [];
+  if (r.filmMtf) parts.push(t('filmMtf'));
   if (r.grain.amount) parts.push(`${t('filmGrain')} ${t(GRAIN_LABEL[r.grain.amount])}${r.grain.size === 'large' ? ` · ${t('grainLarge')}` : ''}`);
   if (halo) parts.push(`${t('haloStart')} ${t(HALO_LABEL[halo])}${colour === 'red' ? '' : ` · ${t(({ white: 'haloWhite', gold: 'haloGold', orange: 'haloOrange' } as const)[colour])}`}`);
   if (r.sharpness) parts.push(`${t('recipeSharpness')} ${sign(r.sharpness)}`);
@@ -135,10 +158,14 @@ function summary(r: RecipeState, halo: number, colour: HaloColour): string {
 
 /** A film's recipe: grain, where the camera's Halation, Sharpness, Clarity and Shading start. Folded to a line until opened. */
 export function RecipeSection({ id }: { id: SlotId }) {
+  const state = useStore(s => s);
   const r = useStore((s) => recipeOf(id, s));
   const halo = useStore((s) => halationOf(id, s).preview);
   const colour = useStore((s) => halationOf(id, s).colour ?? 'red');
   const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState<{ owner: SlotState; text: string }>();
+  const reuse = textureReuseSupported(state) && state.activeSlot === id;
+  const choices = reuse ? textureReuseChoices(id, state) : [];
   const line = summary(r, halo, colour);
   return (
     <div className={`recipe ${open ? 'open' : ''}`}>
@@ -149,6 +176,18 @@ export function RecipeSection({ id }: { id: SlotId }) {
       </button>
       {open && (
         <div className="recipe-body">
+          {reuse && <div>
+            {choices.length > 0 ? <Select value={undefined} variant="box" label={t('textureReuse')} placeholder={t('textureReuse')}
+              options={choices.map(c => ({ value: c.from, label: c.label }))} onChange={from => {
+                const choice = choices.find(c => c.from === from);
+                const applied = !!choice && reuseTexture(choice);
+                setNotice({ owner: getState().slots[id], text: t(applied ? 'textureReuseApplied' : 'textureReuseRefused') });
+              }} /> : <p className="small muted recipe-note">{t('textureReuseNone')}</p>}
+            <p className="small muted recipe-note">{t('textureReuseHint')}</p>
+            {notice?.owner === state.slots[id] && <p className="small muted recipe-note" role="status">{notice.text}</p>}
+          </div>}
+          <div className="recipe-row mtf-row"><span>{t('filmMtf')}</span><Switch checked={r.filmMtf === true} onChange={v => setRecipe(id, { filmMtf: v ? true : undefined })} label={t('filmMtf')} /></div>
+          {r.filmMtf && <p className="small muted recipe-note">{t('filmMtfHint')}{(r.sharpness !== 0 || r.clarity !== 0) && ` ${t('filmMtfNative')}`}</p>}
           <div className="recipe-row">
             <span>{t('filmGrain')}</span>
             <div className="chips">

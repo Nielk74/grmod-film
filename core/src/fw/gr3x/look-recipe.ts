@@ -8,6 +8,7 @@ export const GR3X_RECIPE_MAGIC = new TextEncoder().encode('GR3X-T5-RECIPE\0');
 /** Round 6: twenty films with their icons and curves take about 0.55 MB of JSON. */
 const RECIPE_MAX = 1500000;
 export function encodeGr3xLookRecipe(options: Gr3xLookOptions): Uint8Array {
+  if (options.textureGeometry !== undefined && (!['sensor', 'output'].includes(options.textureGeometry) || options.filmCount === undefined)) throw new FirmwareError('bad-edit', 'invalid IIIx texture geometry');
   const recipe = {
     schema: options.displayRevision ?? 2, monoReplicas: options.monoReplicas === true,
     // Written only when set, so T6c recipes (shared parameters) stay byte-identical.
@@ -18,6 +19,7 @@ export function encodeGr3xLookRecipe(options: Gr3xLookOptions): Uint8Array {
     // GR Mod's film recipes: a film's Hue is its teal sky (only when set: other recipes unchanged).
     ...(options.tealHue === true ? { tealHue: true } : {}),
     ...(options.grainRow === true ? { grainRow: true } : {}),
+    ...(options.textureGeometry !== undefined ? { textureGeometry: options.textureGeometry } : {}),
     films: (options.films ?? []).map(f => ({
       name: f.name,
       ...(f.names && Object.keys(f.names).length ? { names: f.names } : {}),
@@ -53,11 +55,13 @@ export function readGr3xLookRecipe(appendedRtos: Uint8Array): Gr3xLookOptions | 
         (r.filmCount === undefined && size > 512000) ||
         r.films.length > (r.filmCount ?? (r.schema === 3 ? 9 : 2)) || (r.schema === 3 && r.monoReplicas) || (r.schema !== 3 && size > 256000) ||
         (r.ownParameters !== undefined && (r.ownParameters !== true || r.schema !== 3)) ||
-        (r.jpegDiagnostics !== undefined && r.jpegDiagnostics !== true))
+        (r.jpegDiagnostics !== undefined && r.jpegDiagnostics !== true) ||
+        (r.textureGeometry !== undefined && (!['sensor', 'output'].includes(r.textureGeometry) || r.filmCount === undefined)))
       throw new FirmwareError('bad-edit', 'invalid IIIx recipe');
     return { displayRevision: r.schema, monoReplicas: r.monoReplicas, ...(r.ownParameters ? { ownParameters: true } : {}),
       ...(r.jpegDiagnostics ? { jpegDiagnostics: true } : {}), ...(r.filmCount !== undefined ? { filmCount: r.filmCount } : {}),
       ...(r.tealHue === true && r.filmCount !== undefined ? { tealHue: true } : {}),
+      ...(r.textureGeometry !== undefined ? { textureGeometry: r.textureGeometry } : {}),
       ...(r.grainRow === true && r.filmCount !== undefined ? { grainRow: true } : {}), films: r.films.map((f: Record<string, any>) => {
       if (typeof f.name !== 'string' || (f.icon && (!Array.isArray(f.icon) || f.icon.length !== 6400 ||
           f.icon.some((v: number) => !Number.isInteger(v) || v < 0 || v > 255))))
