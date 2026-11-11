@@ -99,9 +99,9 @@ test('furniture does not cover moment art (counter; tab while shown), except the
       if (tier === 2 && m === 'shot' && f.kind === 'instant' && (t < 260 || t >= 1560)) continue; // the whole print rises and ejects across the counter
       if (tier === 2 && m === 'shot' && f.kind === 'slide' && t >= 900) continue; // the mount's side borders push out sideways, across the counter
       const v = r.render(m, f.index, 17, 12, t, { tier, tabMode: 'always' });
-      const aside = tier === 2 && ((m === 'shot' && (f.kind === 'slide' || f.kind === 'instant')) || m !== 'shot');
+      const aside = m === 'load' || (tier === 2 && ((m === 'shot' && (f.kind === 'slide' || f.kind === 'instant')) || m !== 'shot'));
       for (const fur of v.filter(x => x.role === 'furniture' && x.active)) for (const mv of v.filter(x => x.role === 'moment' && x.active)) {
-        if (fur.id === 'tab' && aside && (t < 180 || t >= duration(m, f) - 240)) continue; // mid-slide: the tab may pass the art for under 240 ms
+        if (fur.id === 'tab' && aside && (t < 180 || t >= duration(m, f) - 250)) continue; // mid-slide: the tab may pass the art for under 240 ms
         if (fur.id === 'counter' && tier === 2 && m === 'roll' && (t < 460 || t >= 2900)) continue; // the sheet slides in and out under it
         if (fur.id === 'counter' && tier === 2 && m === 'shot' && f.kind === 'instant') continue; // the counter sits inside the print's thick border by design
         for (let y = 0; y < fur.h; y++) for (let x = 0; x < fur.w; x++) {
@@ -179,4 +179,20 @@ test('load tier 2: the bands carry only the LOADED line (bottom band empty, no c
   assert.equal(v.find(x => x.id === 'bottom').active, false);
   const top = v.find(x => x.id === 'top').rgba;
   for (let y = 8; y < 36; y++) for (let x = 2; x < 22; x++) assert.equal(top[y * 720 + x], 0xff0e0e0e, 'no chip in tier 2');
+});
+
+test('instant tier 1 draws no progress bar: the bands are white print borders with the INSTANT caption only', () => {
+  const r = createRenderer(), f = idxOf('Instant');
+  const bottom = r.render('shot', f, 17, 12, 1000, { tier: 1 }).find(x => x.id === 'bottom').rgba;
+  let dark = 0; for (let y = 8; y < 36; y++) for (let x = 230; x < 700; x++) if (bottom[y * 720 + x] !== 0xfff0f8fa) dark++;
+  assert.equal(dark, 0, 'nothing right of the caption');
+});
+
+test('load: the tab is out during the cassette and slides in as the cassette leaves (hand-off), in both tiers', () => {
+  const r = createRenderer(), f = idxOf('Portra 400');
+  for (const tier of [1, 2]) {
+    assert.equal(r.render('load', f, 1, 12, 1000, { tier, tabMode: 'always' }).find(x => x.id === 'tab').active, false);
+    assert.equal(r.render('load', f, 1, 12, 2100, { tier, tabMode: 'always' }).find(x => x.id === 'tab').active, true);
+    assert.equal(r.render('load', f, 1, 12, 2190, { tier, tabMode: 'always' }).find(x => x.id === 'tab').active, true);
+  }
 });

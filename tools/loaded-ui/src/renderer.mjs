@@ -172,16 +172,9 @@ const MONTHS = 'JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC';
 // ---------------------------------------------------------------- instant print
 const mlv = { lo: 0, hi: 0, frac: 0 };
 function milk(t) { const a = (236 * (ONE - inOut(prog(t, 160, 1560)))) >> 10; mlv.lo = a & ~31; mlv.hi = mlv.lo + 32 > 255 ? 255 : mlv.lo + 32; mlv.frac = (a & 31) >> 1; }
-function drawInstantBand(s, top, t) { // tier 1 only: the camera's review rows (y 8-38 and 440-470) sit inside the 44 px white borders
-  if (top) {
-    s.rect(0, 0, W, 44, P.WHT); s.rect(0, 42, W, 2, P.ISH);
-    s.text('INSTANT', 24, 12, 3, P.INK);
-  } else {
-    s.rect(0, 0, W, 44, P.WHT); s.rect(0, 0, W, 2, P.ISH);
-    s.text('DEVELOPING', 24, 12, 3, P.INK);   // no room over the picture in tier 1: a gauge instead of the milky layer
-    s.rect(230, 12, 466, 20, P.INK); s.rect(233, 15, 460, 14, P.WHT);
-    s.rect(233, 15, (460 * inOut(prog(t, 160, 1560))) >> 10, 14, P.INK);
-  }
+function drawInstantBand(s, top) { // tier 1 only: white print borders, 44 px, over the review's info rows (y 8-38 and 440-470)
+  if (top) { s.rect(0, 0, W, 44, P.WHT); s.rect(0, 42, W, 2, P.ISH); }
+  else { s.rect(0, 0, W, 44, P.WHT); s.rect(0, 0, W, 2, P.ISH); s.text('INSTANT', 24, 12, 3, P.INK); }
 }
 /** Tier 2: the whole print as one object, moved by py (rise from below, eject upward). */
 function drawInstantPrint(s, py) {
@@ -383,7 +376,13 @@ export function createRenderer({ guard = 0 } = {}) {
   }
   /** The tab steps aside while a moment's art would cover it (tier 2 slide/instant/load/roll). */
   function tabAside(moment, film, tier, t, dur, active) {
-    if (!active || tier !== 2) return 0;
+    if (!active) return 0;
+    if (moment === 'load') { // hand-off: the tab is out while the cassette is on screen, and slides in as it leaves
+      if (t < 180) return outCubic(prog(t, 0, 180));
+      if (t < 1950) return ONE;
+      return ONE - outCubic(prog(t, 1950, dur));
+    }
+    if (tier !== 2) return 0;
     if (moment === 'shot' && film.kind !== 'slide' && film.kind !== 'instant') return 0;
     if (t < 180) return outCubic(prog(t, 0, 180));                 // slides out like a peek slides in, reversed
     const back = film.kind === 'instant' && moment === 'shot' ? 110 : 240; // instant: wait for the print to leave
@@ -457,7 +456,7 @@ export function createRenderer({ guard = 0 } = {}) {
         s.oy = (top ? -off : off) - ej; s.ox = ox;
         if (moment === 'shot') {
           if (kind === 'slide') drawMountBand(s, top, film, frame, date);
-          else if (kind === 'instant') drawInstantBand(s, top, t);
+          else if (kind === 'instant') drawInstantBand(s, top);
           else drawStripBand(s, top, film, frame, adv, vel);
         } else if (moment === 'load') drawLoadBand(s, top, film, t, tier);
         else drawRollBand(s, top, film, roll, t);
@@ -584,3 +583,6 @@ export function createRenderer({ guard = 0 } = {}) {
 
   return { views, byId, render, guardsIntact: () => views.every(v => v.surface.guardIntact()), palette: () => pal };
 }
+
+/** Geometry and timing constants shared with the native port (native/loaded_data.h is generated from these). */
+export const GEOM = { CELL, PITCH, HOLE_W, HOLE_H, HOLE_X0, CINE_PITCH, CINE_HW, CINE_HH, REST_CELL, ROLL_WIN, LOAD_ROLL, REWIND, SHEET, DEFAULT_DATE };
