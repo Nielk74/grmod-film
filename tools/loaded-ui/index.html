@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loaded lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; background: #1b1b1f; color: #ddd; font: 13px system-ui, sans-serif; }
+  main { padding: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button, select { font: inherit; padding: 5px 10px; background: #2d2d34; color: #eee; border: 1px solid #555; border-radius: 4px; }
+  button:hover { background: #3a3a44; }
+  #screen { display: block; image-rendering: pixelated; background: #000; border: 1px solid #444; }
+  label { display: inline-flex; gap: 4px; align-items: center; }
+  details { margin-top: 12px; max-width: 760px; color: #aaa; }
+  pre { white-space: pre-wrap; }
+  .note { color: #e8b84a; max-width: 760px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="bar">
+    <label>Film <select id="film"></select></label>
+    <button id="load">Load film</button>
+    <button id="shot">Take a picture</button>
+    <button id="roll">Finish the roll</button>
+    <button id="wake">Power on (peek)</button>
+  </div>
+  <div class="bar">
+    <label>Tier <select id="tier"><option value="1">tier 1 (small views)</option><option value="2">tier 1+2 (adds full screen)</option></select></label>
+    <label>Tab and counter <select id="tabmode"><option value="always">always</option><option value="peek">peek</option></select></label>
+    <label>Photo <select id="photo"></select></label>
+    <label>Contact sheet <select id="thumbs"><option value="1">real thumbnails</option><option value="0">no thumbnails</option></select></label>
+    <label><input type="checkbox" id="ph" checked> camera placeholders</label>
+    <label><input type="checkbox" id="zoom"> 2x zoom (inspection only; 1:1 is the truth)</label>
+  </div>
+  <div class="bar">
+    <button id="pause">Pause</button>
+    <input type="range" id="scrub" min="0" max="3400" value="0" style="width:420px">
+    <span id="status"></span>
+  </div>
+  <canvas id="screen" width="720" height="480"></canvas>
+  <p class="note">Browser simulation of the reference renderer, composited in JS over a still photo. Not a camera result. Magenta boxes are guesses for the camera's own overlay; their position is unverified.</p>
+  <details><summary>Photo credits</summary><pre id="credits"></pre></details>
+</main>
+<script type="module" src="/src/lab.mjs"></script>
+</body>
+</html>
