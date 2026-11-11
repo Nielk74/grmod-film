@@ -1,7 +1,7 @@
-import { createRenderer } from './renderer.mjs';
+import { createRenderer, SHEET } from './renderer.mjs';
 import { compositeInto } from './compose.mjs';
 import { FILMS, ROLL_LENGTH } from './films.mjs';
-import { PLACEHOLDERS, duration, W, H } from './plan.mjs';
+import { PLACEHOLDERS, REVIEW_PLACEHOLDERS, duration, W, H } from './plan.mjs';
 import credits from '../../../ui/src/assets/samples/CREDITS.md?raw';
 
 const photos = import.meta.glob('../../../ui/src/assets/samples/*.jpg', { eager: true, query: '?url', import: 'default' });
@@ -33,8 +33,8 @@ async function loadPhoto(url) {
   if (thumbs.length) return;
   const all = await Promise.all(urls.map(([, u]) => cover(u, 420, 280)));
   for (let i = 0; i < ROLL_LENGTH; i++) {
-    const src = all[i % all.length], t = new Uint32Array(70 * 46), ox = ((i * 37) % 6) * 28, oy = ((i * 11) % 5) * 18;
-    for (let y = 0; y < 46; y++) for (let x = 0; x < 70; x++) t[y * 70 + x] = src[((oy + y * 4) % 280) * 420 + (ox + x * 4) % 420];
+    const src = all[i % all.length], t = new Uint32Array(SHEET.fw * SHEET.fh), ox = ((i * 37) % 6) * 28, oy = ((i * 11) % 5) * 18;
+    for (let y = 0; y < SHEET.fh; y++) for (let x = 0; x < SHEET.fw; x++) t[y * SHEET.fw + x] = src[((oy + y * 4) % 280) * 420 + (ox + x * 4) % 420];
     thumbs.push(t);
   }
 }
@@ -76,10 +76,11 @@ function tick() {
   const opts = { tier: +$('tier').value, tabMode: $('tabmode').value, peekElapsed: pe < 5000 ? pe : -1,
     thumbs: $('thumbs').value === '1' ? thumbs : null };
   buf.set(base);
+  if ($('ph').checked && st.moment === 'shot') for (const p of REVIEW_PLACEHOLDERS) { /* under the overlays, so a row that peeks out during the slide shows */ for (let x = p.x; x < p.x + p.w; x++) { buf[p.y * W + x] = 0xffff00ff; buf[(p.y + p.h - 1) * W + x] = 0xffff00ff; } for (let y = p.y; y < p.y + p.h; y++) { buf[y * W + p.x] = 0xffff00ff; buf[y * W + p.x + p.w - 1] = 0xffff00ff; } }
   compositeInto(buf, r.render(st.moment, f.index, st.frame, st.roll, el, opts));
   octx.putImageData(image, 0, 0);
   ctx.drawImage(off, 0, 0);
-  if ($('ph').checked) {
+  if ($('ph').checked && st.moment !== 'shot') {
     ctx.strokeStyle = '#f0f'; ctx.fillStyle = '#f0f'; ctx.font = '12px monospace';
     for (const p of PLACEHOLDERS) {
       ctx.strokeRect(p.x + .5, p.y + .5, p.w - 1, p.h - 1);

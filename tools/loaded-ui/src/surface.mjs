@@ -2,7 +2,10 @@
 // An indexed (8 bit) drawing surface for one view. Every primitive clips to the view rectangle, so no
 // write can leave it. The buffer is allocated once with an optional guard ring (filled with a canary
 // by the tests) to prove that. Index 0 is always fully transparent.
-import { FONT_DATA, FONT_INDEX, GLYPH_H } from './font.mjs';
+import { FONT_DATA, FONT_INDEX, GLYPH_H, COUNTER_DATA, COUNTER_H } from './font.mjs';
+
+/** 4x4 ordered-dither thresholds (0..15). */
+export const BAYER = new Uint8Array([0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]);
 
 export const CANARY = 0xfe;
 
@@ -98,6 +101,23 @@ export class Surface {
   /** Fills the lower-right triangle (xx + yy >= n - 1) of an n x n box: a folded corner. */
   triBR(x, y, n, c) {
     for (let yy = 0; yy < n; yy++) this.rect(x + n - 1 - yy, y + yy, yy + 1, 1, c);
+  }
+  /** Counter digit (7x11 cell): code 0-9, 10 blank, 11 S. */
+  big(code, x, y, scale, c) {
+    for (let row = 0; row < COUNTER_H; row++) {
+      const bits = COUNTER_DATA[code * COUNTER_H + row];
+      for (let col = 0; col < 7; col++) if (bits & (64 >> col)) this.rect(x + col * scale, y + row * scale, scale, scale, c);
+    }
+  }
+  /** Ordered dither between two palette entries: pixel gets `hi` where the Bayer threshold is below `frac` (0..16). */
+  ditherRect(x, y, w, h, frac, lo, hi) {
+    x += this.ox; y += this.oy;
+    const x0 = x < this.cx0 ? this.cx0 : x, y0 = y < this.cy0 ? this.cy0 : y;
+    const x1 = x + w > this.cx1 ? this.cx1 : x + w, y1 = y + h > this.cy1 ? this.cy1 : y + h;
+    for (let yy = y0; yy < y1; yy++) {
+      const o = this.origin + yy * this.stride;
+      for (let xx = x0; xx < x1; xx++) this.buf[o + xx] = BAYER[((yy & 3) << 2) | (xx & 3)] < frac ? hi : lo;
+    }
   }
   glyph(code, x, y, scale, c) {
     const g = code < 256 ? FONT_INDEX[code] : -1;

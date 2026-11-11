@@ -15,10 +15,12 @@ const EDGE = {
   'Portra 400': [255, 206, 64], 'Gold 200': [255, 176, 32], 'CineStill 800T': [255, 84, 60],
   'Eterna': [255, 150, 60], 'Blockbuster': [255, 178, 70],
 };
+/** Tab and cassette text: the 40 px icon captions are not a constraint here. */
+const TEXT = { 'CineStill 800T': { caption: 'CINESTILL', code: '800T' } };
 export const FILMS = LOOKS.map((l, i) => {
   const kind = KIND[l.name] || 'neg';
   const edge = EDGE[l.name] || (kind === 'bw' ? [236, 236, 230] : kind === 'neg' ? [255, 190, 60] : l.ink);
-  return { index: i, name: l.name, group: l.group, caption: l.caption, code: l.code, kind, edge,
+  return { index: i, name: l.name, group: l.group, caption: (TEXT[l.name] || l).caption, code: (TEXT[l.name] || l).code, kind, edge,
     panel: l.panel, band: l.band, ink: l.ink, captionInk: l.captionInk, label: l.name.toUpperCase() };
 });
 export const FOCUS = ['Portra 400', 'Gold 200', 'CineStill 800T'].map(n => FILMS.findIndex(f => f.name === n));

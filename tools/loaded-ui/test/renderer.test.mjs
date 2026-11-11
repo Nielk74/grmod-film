@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createRenderer, PALETTE_SIZE, P } from '../src/renderer.mjs';
+import { createRenderer, PALETTE_SIZE, P, SHEET } from '../src/renderer.mjs';
 import { createDriver } from '../src/driver.mjs';
 import { FILMS } from '../src/films.mjs';
 import { VIEWS, duration, tier1Bytes, tier2Bytes, MOMENTS } from '../src/plan.mjs';
@@ -126,8 +126,8 @@ test('counter roll: 9 to 10 rolls both wheels, 36 to 1 holds at the end, wheels 
   const at = (frame, t, m = 'shot') => { r.render(m, f, frame, 1, t, { tier: 1, tabMode: 'always' }); return counter(); };
   const before = at(9, 0), mid = at(9, 710), after = at(9, 1000);
   assert.notDeepEqual(before, mid); assert.notDeepEqual(mid, after);
-  const tensRegion = a => { const o = []; for (let y = 4; y < 36; y++) for (let x = 7; x < 35; x++) o.push(a[y * 72 + x]); return o; };
-  const onesRegion = a => { const o = []; for (let y = 4; y < 36; y++) for (let x = 37; x < 65; x++) o.push(a[y * 72 + x]); return o; };
+  const tensRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 9; x < 39; x++) o.push(a[y * 84 + x]); return o; };
+  const onesRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 45; x < 75; x++) o.push(a[y * 84 + x]); return o; };
   assert.notDeepEqual(tensRegion(before), tensRegion(after), 'tens wheel goes from blank to 1');
   assert.notDeepEqual(onesRegion(before), onesRegion(after));
   // 9 -> 10 must show the same pixels as a static 10
@@ -164,7 +164,7 @@ test('peek mode: hidden by default, slides in, shown, slides out, gone; always m
 });
 
 test('views: tier 1 memory around 300 KB, every view rectangle on the 720x480 screen', () => {
-  assert.equal(tier1Bytes(), 293632);
+  assert.equal(tier1Bytes(), 298240);
   assert.equal(tier2Bytes(), 1382400);
   for (const v of VIEWS) assert.ok(v.x >= 0 && v.y >= 0 && v.x + v.w <= 720 && v.y + v.h <= 480, v.id);
 });
@@ -193,7 +193,7 @@ test('font: no text smaller than 14 px tall is drawn (scale >= 2 everywhere)', (
 
 test('contact sheet: thumbnails replace tiles; without them tiles are plain; circle appears late', () => {
   const r = createRenderer(), f = 11;
-  const thumbs = Array.from({ length: 36 }, () => new Uint32Array(70 * 46).fill(0xff00ff00));
+  const thumbs = Array.from({ length: 36 }, () => new Uint32Array(SHEET.fw * SHEET.fh).fill(0xff00ff00));
   const withT = hashOf(r.render('roll', f, 36, 12, 1500, { tier: 2, tabMode: 'always', thumbs }));
   const without = hashOf(r.render('roll', f, 36, 12, 1500, { tier: 2, tabMode: 'always' }));
   assert.notEqual(withT, without);

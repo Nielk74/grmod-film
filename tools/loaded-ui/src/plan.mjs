@@ -8,7 +8,7 @@ export const VIEWS = [
   { id: 'full',    tier: 2, x: 0,   y: 0,   w: 720, h: 480, role: 'moment' },
   { id: 'top',     tier: 1, x: 0,   y: 0,   w: 720, h: 44,  role: 'moment' },
   { id: 'bottom',  tier: 1, x: 0,   y: 436, w: 720, h: 44,  role: 'moment' },
-  { id: 'counter', tier: 1, x: 648, y: 52,  w: 72,  h: 40,  role: 'furniture' },
+  { id: 'counter', tier: 1, x: 612, y: 48,  w: 84,  h: 48,  role: 'furniture' },
   { id: 'tab',     tier: 1, x: 0,   y: 52,  w: 128, h: 56,  role: 'furniture' },
 ];
 export const rgbaBytes = v => v.w * v.h * 4;
@@ -38,4 +38,15 @@ export const PLACEHOLDERS = [
   { x: 0, y: 440, w: 720, h: 36, label: 'PLACEHOLDER: EXPOSURE INFO ROW (POSITION UNVERIFIED)' },
   { x: 560, y: 4, w: 156, h: 30, label: 'PLACEHOLDER: STATUS ICONS' },
   { x: 4, y: 4, w: 150, h: 30, label: 'PLACEHOLDER: MODE ICONS' },
+];
+
+/**
+ * Second set, from a web photo of a GR III in PLAYBACK (not live view, not the owner's camera): one text row
+ * along the top (date, size, count, card) and one along the bottom (file number, exposure, battery). An
+ * approximate indication only, scaled to 720x480. Used under the shot moment (post-shot review). The opaque
+ * 44 px bands cover both rows completely at rest.
+ */
+export const REVIEW_PLACEHOLDERS = [
+  { x: 0, y: 8, w: 720, h: 30, label: 'REVIEW SCREEN ROW (REFERENCE PHOTO, APPROX.)' },
+  { x: 0, y: 440, w: 720, h: 30, label: 'REVIEW SCREEN ROW (REFERENCE PHOTO, APPROX.)' },
 ];
