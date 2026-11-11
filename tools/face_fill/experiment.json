@@ -1,0 +1,189 @@
+{
+  "experiment": "face-fill-skin",
+  "base_commit": "1bd2956",
+  "hardware_validated": false,
+  "model": {
+    "name": "OpenCV YuNet 2023mar",
+    "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "url": "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet",
+    "license": "MIT"
+  },
+  "film_target": {
+    "source": "examples/gr3x/film-pack-v3/response.ts and core/src/filmpack/looks.ts",
+    "colour_push": 1.5,
+    "mid_saturation": 0.12,
+    "cube_size": 33,
+    "native_fit": false
+  },
+  "metadata_audit": {
+    "jpeg_count": 194,
+    "recognized_ricoh_makernotes": 192,
+    "face_tag_presence": {
+      "0x040b": 192
+    },
+    "layout_count_pairs": {
+      "0,0": 177,
+      "1,0": 1,
+      "1,1": 5,
+      "0,1": 4,
+      "2,1": 1,
+      "1,4": 1,
+      "4,4": 1,
+      "3,3": 2
+    }
+  },
+  "firmware": {
+    "model": "GR III",
+    "version": "2.10",
+    "container_sha256": "d6a3c9c288d784080e7b283222ecdd8752adfeed6faa36dab44f73115354bfd4",
+    "rtos_sha256": "8a4eafcad2716e0b21e9909264e1242e534f0e39e05cba82a53546ceb4070b67",
+    "rea_blocker": "Windows REA raw ARM target unsupported; Ghidra missing; no live provider used",
+    "unknowns": [
+      "Live face service API, count and owner",
+      "Shot-time boxes lifetime and synchronization",
+      "Coordinates relative to sensor/crop/rotation",
+      "Boxes availability at JpegEncodeMacroProcess::Execute",
+      "GR IIIx separately inspected here: no"
+    ]
+  },
+  "sources": [
+    {
+      "id": "Ricoh/R0000030.JPG",
+      "sha256": "6c349521c7fc132364ffb726014115b5188b824de7e8ce14e6b35c954fa79da0",
+      "original_hash_unchanged": true,
+      "orientation": 6,
+      "render_size": [
+        4000,
+        6000
+      ],
+      "image_tone_code": 256,
+      "accepted_faces": 1,
+      "rejected_groups": 1,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": 0.7585621774196625,
+        "p10_ev_core": 0.5851567447185516,
+        "core_pixels": 377002,
+        "changed_over_1_code_pixels": 1366569,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.13224508333333335
+      }
+    },
+    {
+      "id": "Ricoh/R0000005.JPG",
+      "sha256": "0120f0317c74f5fbe516ab7fd224b388ff3b291febe53c719d4ad55d7bb02baa",
+      "original_hash_unchanged": true,
+      "orientation": 6,
+      "render_size": [
+        4000,
+        6000
+      ],
+      "image_tone_code": 256,
+      "accepted_faces": 1,
+      "rejected_groups": 0,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": 0.8447194695472717,
+        "p10_ev_core": 0.6399696290493011,
+        "core_pixels": 454940,
+        "changed_over_1_code_pixels": 649947,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.07078495833333333
+      }
+    },
+    {
+      "id": "Ricoh/AK000164.JPG",
+      "sha256": "62269794681df8aaf6142262bcf5a0c65ff8831913208a6dba44710caae0c7c0",
+      "original_hash_unchanged": true,
+      "orientation": 8,
+      "render_size": [
+        4000,
+        6000
+      ],
+      "image_tone_code": 256,
+      "accepted_faces": 1,
+      "rejected_groups": 0,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": 0.8483119606971741,
+        "p10_ev_core": 0.664631724357605,
+        "core_pixels": 5065050,
+        "changed_over_1_code_pixels": 6896704,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.38634175
+      }
+    },
+    {
+      "id": "Ricoh/AK000075.JPG",
+      "sha256": "0d916c8081685a30aaf5710f878b91bb035df7949a1f2258175e39b175078267",
+      "original_hash_unchanged": true,
+      "orientation": 8,
+      "render_size": [
+        4000,
+        6000
+      ],
+      "image_tone_code": 262,
+      "accepted_faces": 1,
+      "rejected_groups": 0,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": 0.8385898470878601,
+        "p10_ev_core": 0.6331400156021119,
+        "core_pixels": 727313,
+        "changed_over_1_code_pixels": 1070823,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.05574958333333333
+      }
+    },
+    {
+      "id": "Ricoh/R0000043.JPG",
+      "sha256": "5f1442aa191fc6f62f8a8bec9d86e0a2d54305e2bf08cbf69856f30174755834",
+      "original_hash_unchanged": true,
+      "orientation": 1,
+      "render_size": [
+        6000,
+        4000
+      ],
+      "image_tone_code": 262,
+      "accepted_faces": 8,
+      "rejected_groups": 0,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": 0.849999725818634,
+        "p10_ev_core": 0.6807277798652649,
+        "core_pixels": 2242639,
+        "changed_over_1_code_pixels": 3220402,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.15474108333333333
+      }
+    },
+    {
+      "id": "Ricoh2/AK000001.JPG",
+      "sha256": "580d696955b8a9b3b35c3550e642ceaef1fcb3418e91857d319f9b4111cfa162",
+      "original_hash_unchanged": true,
+      "orientation": 8,
+      "render_size": [
+        3200,
+        4800
+      ],
+      "image_tone_code": 266,
+      "accepted_faces": 0,
+      "rejected_groups": 0,
+      "fill_metrics": {
+        "maximum_ev": 0.85,
+        "median_ev_core": null,
+        "p10_ev_core": null,
+        "core_pixels": 0,
+        "changed_over_1_code_pixels": 0,
+        "outside_mask_max_abs": 0.0,
+        "new_float_clip_pixels": 0,
+        "mask_nonzero_fraction": 0.0
+      }
+    }
+  ]
+}
