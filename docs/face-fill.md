@@ -131,7 +131,7 @@ broad robustness. No-face identity and warm clothing outside the face
 support are checked explicitly. A skin-coloured object inside an accepted
 false face box can still be changed.
 
-## Firmware evidence and remaining integration work
+## Firmware evidence at the desktop experiment stage
 
 The exact official **GR III 2.10** container SHA-256 is
 `d6a3c9c288d784080e7b283222ecdd8752adfeed6faa36dab44f73115354bfd4`;
@@ -210,3 +210,78 @@ guards, isolated verifier imports and ICC verification across processes.
 the production UI build pass. The unchanged suite logs its existing preview
 URL warnings under Node; Vite also reports the existing `host.js` bundling
 notice. None of these checks is a hardware timing or image-quality test.
+
+## Native manual-test prototype
+
+Following the user's approval to build two custom firmwares, the face feature
+now has a separate native implementation and guarded builder in
+[`tools/face_fill_firmware/README.md`](../tools/face_fill_firmware/README.md).
+That document contains exact addresses, boundary stubs, pinned input hashes,
+reproduction commands, installation/control/rollback instructions and the
+remaining hardware limits. The earlier integration list above records the
+desktop experiment's starting position; the evidence below advances it.
+
+The prototype processes the camera's Y + CbCr 4:2:2 pictures before the existing
+v3 JPEG chain. Its gray-response LUT targets +0.85 EV, with a soft face oval,
+a broad warm chroma gate and headroom protection. A realistic one-input
+keeper contracts Cb/Cr by at most approximately 30% on Astia, Nostalgic Neg,
+Kodachrome 64 and Gold 200. It does not restore pre-`95ba6de` heavy-film
+rendering or recover unavailable pre-film colours. The twenty-film v3 colour,
+tone and recipe defaults are retained. Extra FilmMTF is disabled only in the
+isolated experimental baseline, by parent decision to isolate the new JPEG
+operation and avoid that stage's transient heap/latency; the shared builder
+is unchanged.
+
+Original capture and metadata instructions establish separate preceding/A
+and current/B lists in CommonProperty. The current ring is reset and
+repopulated before B is copied. A small pre-capture wrapper also clears B
+count before the original function, covering a skipped-result branch.
+Original config builder, selector and Develop setup instructions prove that
+JPEG config `+0x34` points to the per-frame owned CommonProperty and that
+normal development reads its direct film byte at `+0x77c`. The module copies
+validated B rectangles to its bounded stack, uses no allocation or persistent
+face pointer, and leaves Standard, missing/invalid faces and unsupported
+geometry unchanged. Full L 6000×4000, 3:2, zero-offset pictures and their
+same-ratio screennails are the supported test subset. Other aspects, digital
+crops, smaller main JPEGs, nonzero offsets and RAW development are outside
+the validated subset. RAW development may apply valid saved faces; no RAW
+no-op claim is made.
+
+The complete synthetic probe executes patched original capture, the real
+JPEG configuration builder and the installed JPEG chain with the same owned
+record. Native/reference pixels, missing faces, Standard, a failed allocation
+in the existing grain stage, CPU/register/stack handover and both wrappers'
+flags are checked. This is not observation of the physical camera's
+capture-to-render queue. AF scheduling, burst membership, ISP transfer and
+hardware timing remain manual-test questions. The feature deliberately
+no-ops if valid current records do not reach JPEG.
+
+On the three requested portraits, every full-resolution native ARM byte
+matches the independent NumPy reference. Measured median linear-sRGB skin
+core lift is 0.721 EV daylight, 0.774 EV window and 0.753 EV night, with zero
+new RGB clip pixels in these comparisons. The core is the same independent
+original-image desktop skin mask above 166/255. Actual ARM fill+keeper is
+shown against the YCbCr422 basis and earlier RGB fill in:
+
+`C:/Users/Antoine/.codex/worktrees/face-fill-skin/grmod-film/scratch/face-fill-firmware/photos/`
+
+Open `R0000030-native-sheet.jpg`, `R0000005-native-sheet.jpg`,
+`AK000164-native-sheet.jpg` and their `-native-crop-100.jpg` counterparts.
+`photos/report.json` pins the final native module hash, untouched source
+hashes, encoded rectangles and measured exposure. These old photos have
+empty camera face lists, so the real saved YuNet detections remain the
+stand-in for this pixel test. The earlier multi-face, no-face, miss and
+false-positive sheets remain relevant; this small selection does not prove
+skin-tone diversity or camera detector quality.
+
+Native validation passes 41 independent pixel cases and four capture-clear
+cases. The source traces and five complete installed-chain cases pass.
+The final candidate is `scratch/face-fill-firmware/fwdc239b.bin`,
+38,433,372 bytes, SHA-256
+`fbb5b129766e313b54694ba5d1042a861d2cee49d3121653de4d1cba02030eca`.
+Container readback and the complete baseline-byte diff audit permit only
+two entry-word patches, the RTOS size field and one appended 24,576-byte
+RTOS frame. All non-RTOS sections remain identical to the reviewed
+no-extra-MTF v3 baseline. The parent independently reran 237 npm tests with
+175 fixture-related skips, core type checking and the production UI build.
+No firmware was flashed, pushed or published.
