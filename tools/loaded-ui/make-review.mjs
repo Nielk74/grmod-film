@@ -54,17 +54,20 @@ function boxes(dst, list, short) {
   for (const p of list) {
     for (let x = p.x; x < p.x + p.w; x++) for (const y of [p.y, p.y + p.h - 1]) dst[y * W + x] = MAG;
     for (let y = p.y; y < p.y + p.h; y++) for (const x of [p.x, p.x + p.w - 1]) dst[y * W + x] = MAG;
-    stamp(dst, W, short ? 'PLACEHOLDER' : p.label.replace('EXPOSURE INFO ROW (POSITION UNVERIFIED)', 'CAMERA INFO ROW (UNVERIFIED)'), p.x + 4, p.y + 4);
+    const text = p.label.length * 12 <= p.w - 8 ? p.label : '';
+    if (text) stamp(dst, W, text, p.x + 4, p.y + 4);
   }
 }
 /** Composite one frame over the photo. opts.review: draw the review-screen placeholder rows UNDER the overlays
  *  (so any row that peeks out during the slide shows); opts.placeholders: live-view guesses, on top. */
 function frameAt(moment, film, frame, roll, t, opts, label) {
   const dst = new Uint32Array(photo);
-  if (opts.review) boxes(dst, REVIEW_PLACEHOLDERS, false);
+  const rev = opts.review === undefined ? (moment === 'shot' || moment === 'roll') : opts.review;
+  const live = opts.placeholders === undefined ? (moment === 'live' || moment === 'load') : opts.placeholders;
+  if (rev) boxes(dst, REVIEW_PLACEHOLDERS, false);
   compositeInto(dst, r.render(moment, film, frame, roll, t, opts));
-  if (opts.placeholders) boxes(dst, PLACEHOLDERS, false);
-  if (label) stamp(dst, W, label, 6, H - 44 - 26 - (opts.placeholders ? 44 : 0));
+  if (live) boxes(dst, PLACEHOLDERS, false);
+  if (label) stamp(dst, W, label, 6, 50);
   return dst;
 }
 async function savePng(name, pixels, w, h) {
@@ -103,7 +106,7 @@ async function bandMotion(name, moment, fi, frame, times, opts = {}) {
     const full = frameAt(moment, fi, frame, 12, t, { tier: 1, tabMode: 'always', review: moment === 'shot', ...opts }, null);
     const tile = new Uint32Array(tw * th).fill(rgba(40, 40, 46));
     for (let y = 0; y < 44; y++) for (let x = 0; x < W; x++) { tile[y * tw + x] = full[y * W + x]; tile[(46 + y) * tw + x] = full[(436 + y) * W + x]; }
-    for (let y = 0; y < 48; y++) for (let x = 0; x < 84; x++) tile[(y) * tw + W + 6 + x] = full[(48 + y) * W + 612 + x];
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 84; x++) tile[(y) * tw + W + 6 + x] = full[(380 + y) * W + 612 + x];
     stamp(tile, tw, 'T ' + t, W + 6, 64);
     tiles.push(tile);
   }
@@ -148,8 +151,8 @@ files.push(await save('roll-end_portra-400_tier1+2_no-thumbnails.png', rt.map(t 
 files.push(await save('roll-end_gold-200_tier1+2_no-thumbnails.png', [1000, 1800, 2400].map(t =>
   frameAt('roll', idx('Gold 200'), 36, 12, t, { tier: 2, tabMode: 'always' }, `Gold roll end t=${t}ms tier1+2 plain`)), 3));
 const live = [];
-for (const n of ['Portra 400', 'Gold 200', 'CineStill 800T', 'Instant']) live.push(frameAt('live', idx(n), 17, 12, 0, { tier: 1, tabMode: 'always', placeholders: true }, `live view, always, ${n}`));
-for (const pe of [60, 120, 900, 1850]) live.push(frameAt('live', idx('Portra 400'), 17, 12, 0, { tier: 1, tabMode: 'peek', peekElapsed: pe, placeholders: true }, `peek ${pe}ms of 2000`));
+for (const n of ['Portra 400', 'Gold 200', 'CineStill 800T', 'Instant']) live.push(frameAt('live', idx(n), 17, 12, 0, { tier: 1, tabMode: 'always', placeholders: true }, `live view (owner photo, approx.) / ${n}`));
+for (const pe of [60, 120, 900, 1850]) live.push(frameAt('live', idx('Portra 400'), 17, 12, 0, { tier: 1, tabMode: 'peek', counterMode: 'always', peekElapsed: pe, placeholders: true }, `tab peek ${pe}ms of 2000, counter always`));
 files.push(await save('liveview_tab-and-counter.png', live, 4));
 
 // counter close-up: 17, 18, 36, 1, S and a mid-roll frame, 1:1 and 50 percent
@@ -157,7 +160,7 @@ files.push(await save('liveview_tab-and-counter.png', live, 4));
   const tiles = [];
   for (const [fr, t, m] of [[17, 0, 'live'], [18, 0, 'live'], [36, 0, 'live'], [1, 0, 'live'], [1, 0, 'load'], [17, 700, 'shot'], [9, 700, 'shot'], [1, 1600, 'load']]) {
     const full = frameAt(m, idx('Portra 400'), fr, 12, t, { tier: 1, tabMode: 'always' }, null), tile = new Uint32Array(84 * 48);
-    for (let y = 0; y < 48; y++) for (let x = 0; x < 84; x++) tile[y * 84 + x] = full[(48 + y) * W + 612 + x];
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 84; x++) tile[y * 84 + x] = full[(380 + y) * W + 612 + x];
     tiles.push(tile);
   }
   files.push(await save('counter_17-18-36-1-S-and-rolls.png', tiles, 8, 84, 48));
@@ -170,7 +173,7 @@ files.push(await save('liveview_tab-and-counter.png', live, 4));
     const t = f.kind === 'slide' ? 600 : f.kind === 'instant' ? 1000 : 1100;
     const full = frameAt('shot', f.index, 17, 12, t, { tier: 1, tabMode: 'always' }, null);
     const tile = new Uint32Array(tw * th).fill(rgba(40, 40, 46));
-    for (let y = 0; y < 56; y++) for (let x = 0; x < 128; x++) tile[(19 + y) * tw + x] = full[(52 + y) * W + x];
+    for (let y = 0; y < 56; y++) for (let x = 0; x < 128; x++) tile[(19 + y) * tw + x] = full[(376 + y) * W + x];
     for (let y = 0; y < 44; y++) for (let x = 0; x < W; x++) { tile[y * tw + 134 + x] = full[y * W + x]; tile[(46 + y) * tw + 134 + x] = full[(436 + y) * W + x]; }
     tiles.push(tile);
   }

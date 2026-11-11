@@ -141,7 +141,7 @@ function drawStripBand(s, top, film, frame, adv, vel) {
 }
 
 /** A slide mount: card border; the window's rounded corners are cut into the band's inner edge. */
-function drawMountBand(s, top, film, frame) {
+function drawMountBand(s, top, film, frame, date) {
   if (top) {
     s.rect(0, 0, W, 30, P.PAPER);
     s.rect(0, 0, W, 4, P.BAND);
@@ -158,35 +158,40 @@ function drawMountBand(s, top, film, frame) {
     s.rect(14, 11, W - 28, 3, P.SHADE);
     s.rect(0, 0, 14, 14, P.PAPER); s.disc(14, 0, 14, P.T);
     s.rect(W - 14, 0, 14, 14, P.PAPER); s.disc(W - 15, 0, 14, P.T);
-    const w = s.num(frame, 24, 17, 3, P.INK);
-    s.text('NOV 26', 24 + w + 24, 17, 3, P.RED);                 // printed date-style stamp
+    let x = 24 + s.num(frame, 24, 17, 3, P.INK) + 24;
+    // printed date-style stamp: month (0..11) and two-digit year come from the caller
+    for (let i = 0; i < 3; i++) { s.glyph(MONTHS.charCodeAt(date.month * 3 + i), x, 17, 3, P.RED); x += 18; }
+    s.num(date.year, x + 18, 17, 3, P.RED, 2);
     s.text(film.caption, W - 24 - s.textWidth(film.caption, 2), 20, 2, P.INK);
   }
 }
 
+export const DEFAULT_DATE = { month: 10, year: 26 }; // NOV 26 unless the caller passes the real date
+const MONTHS = 'JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC';
+
 // ---------------------------------------------------------------- instant print
 const mlv = { lo: 0, hi: 0, frac: 0 };
 function milk(t) { const a = (236 * (ONE - inOut(prog(t, 160, 1560)))) >> 10; mlv.lo = a & ~31; mlv.hi = mlv.lo + 32 > 255 ? 255 : mlv.lo + 32; mlv.frac = (a & 31) >> 1; }
-function drawInstantBand(s, top, frame) { // tier 1 only
+function drawInstantBand(s, top, t) { // tier 1 only: the camera's review rows (y 8-38 and 440-470) sit inside the 44 px white borders
   if (top) {
-    s.rect(0, 0, W, 16, P.WHT); s.rect(0, 16, W, 2, P.ISH);
-    s.ditherRect(0, 18, W, 26, mlv.frac, P.MILK0, P.MILK1);
+    s.rect(0, 0, W, 44, P.WHT); s.rect(0, 42, W, 2, P.ISH);
+    s.text('INSTANT', 24, 12, 3, P.INK);
   } else {
     s.rect(0, 0, W, 44, P.WHT); s.rect(0, 0, W, 2, P.ISH);
-    s.text('INSTANT', 24, 12, 3, P.INK);
-    s.num(frame, W - 24 - s.numWidth(frame, 3), 12, 3, P.INK);
+    s.text('DEVELOPING', 24, 12, 3, P.INK);   // no room over the picture in tier 1: a gauge instead of the milky layer
+    s.rect(230, 12, 466, 20, P.INK); s.rect(233, 15, 460, 14, P.WHT);
+    s.rect(233, 15, (460 * inOut(prog(t, 160, 1560))) >> 10, 14, P.INK);
   }
 }
 /** Tier 2: the whole print as one object, moved by py (rise from below, eject upward). */
-function drawInstantPrint(s, frame, py) {
+function drawInstantPrint(s, py) {
   s.oy = py;
-  s.rect(0, 0, W, 16, P.WHT); s.rect(0, 436, W, 44, P.WHT);
+  s.rect(0, 0, W, 44, P.WHT); s.rect(0, 380, W, 100, P.WHT);       // top border covers the review's top row; thick bottom
   s.rect(0, 0, 22, H, P.WHT); s.rect(W - 22, 0, 22, H, P.WHT);
-  s.rect(22, 16, W - 44, 2, P.ISH); s.rect(22, 434, W - 44, 2, P.ISH);
-  s.rect(22, 16, 2, 420, P.ISH); s.rect(W - 24, 16, 2, 420, P.ISH);
-  s.text('INSTANT', 24, 448, 3, P.INK);
-  s.num(frame, W - 24 - s.numWidth(frame, 3), 448, 3, P.INK);
-  s.ditherRect(24, 18, W - 48, 416, mlv.frac, P.MILK0, P.MILK1);
+  s.rect(22, 44, W - 44, 2, P.ISH); s.rect(22, 378, W - 44, 2, P.ISH);
+  s.rect(22, 44, 2, 336, P.ISH); s.rect(W - 24, 44, 2, 336, P.ISH);
+  s.text('INSTANT', 40, 412, 3, P.INK);                             // the counter sits in this border (no second number)
+  s.ditherRect(24, 46, W - 48, 332, mlv.frac, P.MILK0, P.MILK1);
   s.oy = 0;
 }
 
@@ -209,14 +214,24 @@ function miniCassette(s, x, film) {
 function bigCassette(s, cx, ty, film) {
   s.rect(cx - 12, ty, 24, 14, P.METD); s.rect(cx - 8, ty, 16, 4, P.METL);
   s.rrect(cx - 62, ty + 12, 124, 18, 6, P.METL); s.rect(cx - 62, ty + 26, 124, 4, P.METD);
-  s.rect(cx - 58, ty + 30, 116, 124, P.BLK);
-  s.rect(cx - 56, ty + 30, 112, 124, P.PANEL);
+  s.rect(cx - 58, ty + 30, 116, 100, P.BLK);
+  s.rect(cx - 56, ty + 30, 112, 100, P.PANEL);
   s.rect(cx - 56, ty + 30, 112, 26, P.BAND);
   s.text(film.caption, cx - (s.textWidth(film.caption, 2) >> 1), ty + 36, 2, P.CINK);
-  s.text(film.code, cx - (s.textWidth(film.code, film.code.length > 3 ? 4 : 5) >> 1), ty + 78, film.code.length > 3 ? 4 : 5, P.FINK);
-  s.rect(cx - 56, ty + 130, 112, 4, P.FINK);
-  s.rrect(cx - 62, ty + 152, 124, 18, 6, P.METD); s.rect(cx - 62, ty + 152, 124, 4, P.BLK);
-  s.rect(cx + 56, ty + 130, 10, 20, P.METD); s.rect(cx + 62, ty + 138, 4, 8, P.BLK);
+  const sc = film.code.length > 3 ? 4 : 5;
+  s.text(film.code, cx - (s.textWidth(film.code, sc) >> 1), ty + 66, sc, P.FINK);
+  s.rect(cx - 56, ty + 112, 112, 4, P.FINK);
+  s.rrect(cx - 62, ty + 128, 124, 18, 6, P.METD); s.rect(cx - 62, ty + 128, 124, 4, P.BLK);
+  s.rect(cx + 56, ty + 62, 10, 36, P.METD); s.rect(cx + 62, ty + 72, 4, 16, P.BLK);   // the felt slot, mid height
+}
+/** Tall leader (35mm film is nearly as tall as its cassette): 98 px, 8 holes per 720 px in two rows, edge print between. */
+function drawBigLeader(s, film, startX, endX, smear) {
+  for (let r = 0; r < 98; r++) {
+    const d = r < 49 ? r : 97 - r, c = d < 28 ? (28 - d) * 2 : 0; // tongue: the corners taper
+    if (endX - c > startX) s.rect(startX, r, endX - c - startX, 1, P.LEAD);
+  }
+  for (let x = endX - 84; x > startX + 8; x -= PITCH) { s.rrect(x, 8, HOLE_W + smear, 22, 6, P.HOLE); s.rrect(x, 68, HOLE_W + smear, 22, 6, P.HOLE); }
+  if (endX - 420 > startX + 8) s.text(film.label, endX - 420, 39, 3, P.EDGE);
 }
 /** Film leader between startX and the tip at endX, drawn in 44 px band layout (holes y 5, edge print y 27). */
 function drawLeader(s, film, startX, endX, smear, label) {
@@ -266,7 +281,7 @@ function drawTab(s, film) {
 }
 
 // ---------------------------------------------------------------- contact sheet (tier 2), clear of the counter
-export const SHEET = { stripX: 44, stripW: 632, stripH: 70, stripY0: 100, stripGap: 8, fw: 64, fh: 42, fx0: 56, fgap: 4 };
+export const SHEET = { stripX: 44, stripW: 632, stripH: 70, stripY0: 56, stripGap: 8, fw: 64, fh: 42, fx0: 56, fgap: 4 };
 export function frameXY(i, out) {
   const r = (i / 9) | 0, c = i % 9;
   out[0] = SHEET.fx0 + c * (SHEET.fw + SHEET.fgap);
@@ -370,7 +385,10 @@ export function createRenderer({ guard = 0 } = {}) {
   function tabAside(moment, film, tier, t, dur, active) {
     if (!active || tier !== 2) return 0;
     if (moment === 'shot' && film.kind !== 'slide' && film.kind !== 'instant') return 0;
-    return ONE; // steps aside for the whole moment (tier 2 only); it is simply back when the moment ends
+    if (t < 180) return outCubic(prog(t, 0, 180));                 // slides out like a peek slides in, reversed
+    const back = film.kind === 'instant' && moment === 'shot' ? 110 : 240; // instant: wait for the print to leave
+    if (t >= dur - back) return ONE - outCubic(prog(t, dur - back, dur)); // and back in at the end, same easing as peek
+    return ONE;
   }
   function finish(v, drawn) {
     if (!drawn) { if (v.dirty) { v.rgba.fill(0); v.dirty = false; } v.active = false; return; }
@@ -388,11 +406,12 @@ export function createRenderer({ guard = 0 } = {}) {
     const dur = duration(moment, film);
     const active = (moment === 'shot' || moment === 'load' || moment === 'roll') && elapsed >= 0 && elapsed < dur;
     const t = elapsed < 0 ? 0 : elapsed, last = frame >= ROLL_LENGTH, kind = film.kind;
+    const date = options.date || DEFAULT_DATE;
     mlv.lo = 0; mlv.hi = 0; mlv.frac = 0;
     if (active && moment === 'shot' && kind === 'instant') milk(t);
     fillPalette(pal, film, mlv.lo, mlv.hi);
 
-    let off = 0, ox = 0, adv = 0, vel = 0, py = 0;
+    let off = 0, ox = 0, adv = 0, vel = 0, py = 0, ej = 0;
     if (active) {
       if (moment === 'shot') {
         if (kind === 'neg' || kind === 'bw' || kind === 'cine') {
@@ -404,22 +423,28 @@ export function createRenderer({ guard = 0 } = {}) {
         } else {
           off = t < 240 ? (44 * (ONE - outCubic(prog(t, 0, 240)))) >> 10 : 0;
           py = t < 1560 ? lerp(H, 0, outCubic(prog(t, 0, 260))) : -lerp(0, H, inCubic(prog(t, 1560, 1800)));
+          ej = t < 1560 ? 0 : lerp(0, H, inCubic(prog(t, 1560, 1800)));   // tier 1: the two bands leave upward together
         }
       } else if (moment === 'load') off = slideOffset(t, 220, 1950, 2200);
       else off = slideOffset(t, 300, 3000, 3400);
     }
     counterState(moment, film, frame, t);
-    let hide = hideAmount(options.tabMode, t, active, options.peekElapsed === undefined ? -1 : options.peekElapsed);
-    const hideTab = Math.max(hide, tabAside(moment, film, tier, t, dur, active));
+    // tab and counter have their own mode ('always' | 'peek') and their own peek clock
+    const pk = options.peekElapsed === undefined ? -1 : options.peekElapsed;
+    const tabPk = options.tabPeekElapsed === undefined ? pk : options.tabPeekElapsed;
+    const cntPk = options.counterPeekElapsed === undefined ? pk : options.counterPeekElapsed;
+    const cntMode = options.counterMode === undefined ? options.tabMode : options.counterMode;
+    const hideCounter = hideAmount(cntMode, t, active, cntPk);
+    const hideTab = Math.max(hideAmount(options.tabMode, t, active, tabPk), tabAside(moment, film, tier, t, dur, active));
 
     for (const v of views) {
       if (v.tier > tier) { finish(v, false); continue; }
       const s = v.surface;
       s.clear();
       if (v.role === 'furniture') {
-        const h = v.id === 'tab' ? hideTab : hide;
+        const h = v.id === 'tab' ? hideTab : hideCounter;
         if (h >= ONE) { finish(v, false); continue; }
-        if (v.id === 'counter') { s.ox = (100 * h) >> 10; drawCounter(s, cs); }
+        if (v.id === 'counter') { s.ox = (108 * h) >> 10; drawCounter(s, cs); }
         else { s.ox = -((132 * h) >> 10); drawTab(s, film); }
         s.ox = 0; finish(v, true); continue;
       }
@@ -428,10 +453,11 @@ export function createRenderer({ guard = 0 } = {}) {
       else {
         const top = v.id === 'top';
         if (moment === 'shot' && kind === 'instant' && tier === 2) { finish(v, false); continue; } // the full view owns the print
-        s.oy = top ? -off : off; s.ox = ox;
+        if (moment === 'load' && tier === 2 && !top) { finish(v, false); continue; }                // the full view owns the cassette and film
+        s.oy = (top ? -off : off) - ej; s.ox = ox;
         if (moment === 'shot') {
-          if (kind === 'slide') drawMountBand(s, top, film, frame);
-          else if (kind === 'instant') drawInstantBand(s, top, frame);
+          if (kind === 'slide') drawMountBand(s, top, film, frame, date);
+          else if (kind === 'instant') drawInstantBand(s, top, t);
           else drawStripBand(s, top, film, frame, adv, vel);
         } else if (moment === 'load') drawLoadBand(s, top, film, t, tier);
         else drawRollBand(s, top, film, roll, t);
@@ -451,10 +477,10 @@ export function createRenderer({ guard = 0 } = {}) {
   function drawLoadBand(s, top, film, t, tier) {
     s.rect(0, 0, W, 44, P.BLK);
     s.rect(0, top ? 42 : 0, W, 2, P.GRY);
-    if (top) {
-      chip(s, film);
-      const full = film.label.length, shown = ((t - 600) / 26) | 0; // letters appear one by one, 3x
-      let x = 76;
+    if (top) { // "<FILM> LOADED" at 3x; in tier 2 the line stands alone (no chip)
+      if (tier === 1) chip(s, film);
+      const full = film.label.length, shown = ((t - 600) / 26) | 0; // letters appear one by one
+      let x = tier === 1 ? 76 : 24;
       for (let i = 0; i < full + 7 && i < shown; i++) {
         if (i < full) s.glyph(film.label.charCodeAt(i), x, 11, 3, P.WHT);
         else if (i > full) s.glyph('LOADED'.charCodeAt(i - full - 1), x, 11, 3, P.EDGE);
@@ -462,7 +488,7 @@ export function createRenderer({ guard = 0 } = {}) {
       }
       return;
     }
-    if (tier === 2) { holeRow(s, 5, HOLE_X0, PITCH, 0, HOLE_W, HOLE_H, 6, 0); return; } // plain film rail; the full view owns the cassette
+    // tier 1 bottom: the cassette slides in and bounces, then pulls the film leader across the band
     const cx = loadCassetteX(t), endX = loadEnd(t, cx);
     const sm = t < 700 ? 0 : smearFor(endX - loadEnd(t - 33 > 0 ? t - 33 : 0, cx), PITCH, 60);
     if (t >= 700) drawLeader(s, film, cx + 140, endX, sm, true);
@@ -472,13 +498,20 @@ export function createRenderer({ guard = 0 } = {}) {
   function drawRollBand(s, top, film, roll, t) {
     s.rect(0, 0, W, 44, P.BLK);
     s.rect(0, top ? 42 : 0, W, 2, P.GRY);
-    if (top) { // the roll summary in edge print, 3x
+    if (top) { // all the text lives here, swapping in place: title, count, rewinding, done (3x)
       chip(s, film);
-      let x = 76; s.text('ROLL', x, 11, 3, P.EDGE); x += 5 * 18;
-      x += s.num(roll, x, 11, 3, P.EDGE) + 36;
-      s.text(film.label, x, 11, 3, P.WHT);
+      if (t < 1000) {
+        let x = 76; s.text('ROLL', x, 11, 3, P.EDGE); x += 5 * 18;
+        x += s.num(roll, x, 11, 3, P.EDGE) + 36;
+        s.text(film.label, x, 11, 3, P.WHT);
+      } else if (t < 1800) {
+        const w = s.num(ROLL_LENGTH, 76, 11, 3, P.EDGE);
+        s.text('FRAMES EXPOSED.', 76 + w + 18, 11, 3, P.WHT);
+      } else if (t < 2700) s.text('REWINDING.', 76, 11, 3, P.WHT);
+      else s.text('FILM REWOUND.', 76, 11, 3, P.EDGE);
       return;
     }
+    // bottom: the whole band is the film racing back into the cassette
     const cx = rewindCassetteX(t), tip = rewindTip(t), racing = t >= REWIND[0] && t < 2700;
     const n = ROLL_LENGTH - (((ROLL_LENGTH - 1) * inOut(prog(t, REWIND[0], REWIND[1]))) >> 10);
     if (tip > cx + 140) {
@@ -486,21 +519,14 @@ export function createRenderer({ guard = 0 } = {}) {
         const c = r < 10 ? (10 - r) * 3 : r > 31 ? (r - 31) * 3 : 0;
         s.rect(cx + 140, 1 + r, tip - c - cx - 140, 1, P.LEAD);
       }
-      const rail = racing ? 1 : 0;
-      if (rail) { // cream rail with dark dashes streaming into the cassette (28 px per tick, never aliasing)
-        s.rrect(cx + 146, 5, tip - cx - 150, HOLE_H, 6, P.HOLE);
+      if (racing) { // cream rail with dark dashes streaming into the cassette (28 px per tick, never aliasing)
+        s.rrect(cx + 146, 3, tip - cx - 150, 16, 6, P.HOLE);
         const sh = ((t * 28) / 33 | 0) % PITCH;
-        for (let x = cx + 146 - sh; x < tip; x += PITCH) s.rect(x, 5, 16, HOLE_H, P.LEAD);
-        // edge print streaks: the frame number counting down, repeated and smeared
-        for (let g = 0; g < 3; g++) s.num(n, 170 + g * 54, 27, 2, P.EDGE);
-        for (let i = 0; i < 6; i++) s.rect(300 + ((hash32(i, (t / 66) | 0) % 380)), 31 + (i & 1) * 4, 30 + (hash32(i, 9) % 50), 2, P.EDGE);
-      } else holeRow(s, 5, HOLE_X0, PITCH, 0, HOLE_W, HOLE_H, 6, 0);
-    }
-    if (t >= REWIND[0] && t < 2900) { // summary plate at 3x over the film
-      s.rrect(306, 3, 406, 38, 6, P.BLK);
-      if (t < 1500) { const w = s.num(ROLL_LENGTH, 318, 11, 3, P.EDGE); s.text('FRAMES EXPOSED.', 318 + w + 18, 11, 3, P.EDGE); } // 36 FRAMES EXPOSED.
-      else if (t < 2700) s.text('REWINDING.', 318, 11, 3, P.EDGE);
-      else s.text('FILM REWOUND.', 318, 11, 3, P.EDGE);
+        for (let x = cx + 146 - sh; x < tip; x += PITCH) s.rect(x, 3, 16, 16, P.LEAD);
+      } else if (t < REWIND[0]) holeRow(s, 3, HOLE_X0 + 160, PITCH, 0, HOLE_W, 17, 6, 0);
+      // edge print: the frame number counting down at 3x, repeated along the film, with streaks between
+      for (let g = 0; g < 3; g++) { const x = 200 + g * 190; if (x + 40 < tip) s.num(n, x, 21, 3, P.EDGE); }
+      if (racing) { s.clip(cx + 140, 0, tip - cx - 140, 44); for (let i = 0; i < 6; i++) s.rect(190 + (hash32(i, (t / 66) | 0) % 480), 24 + (i % 3) * 7, 30 + (hash32(i, 9) % 60), 2, P.EDGE); s.unclip(); }
     }
     miniCassette(s, cx, film);
   }
@@ -519,21 +545,21 @@ export function createRenderer({ guard = 0 } = {}) {
         s.rect(ox, 0, 8, H, P.PAPER); s.rect(ox + 8, 0, 2, H, P.MSH);
         s.rect(W - 8 + ox, 0, 8, H, P.PAPER); s.rect(W - 10 + ox, 0, 2, H, P.MSH);
         s.unclip();
-      } else drawInstantPrint(s, frame, py);
-    } else if (moment === 'load') { // the cassette drops in, bounces, the leader pulls out across the screen
+      } else drawInstantPrint(s, py);
+    } else if (moment === 'load') { // the cassette drops in, bounces, the leader pulls out of it across the screen
       s.clip(0, 44, W, 392);
-      const fall = lerp(0, 420, inCubic(prog(t, 1900, 2200)));
-      const ty = (t < 700 ? lerp(-190, 130, outBounce(prog(t, 0, 700))) : 130) + fall;
-      if (t < 700) s.rrect(88, 306 + fall, 124, 10, 5, P.SHADE);
+      const ty = t < 700 ? lerp(-190, 130, outBounce(prog(t, 0, 700))) : 130;
+      s.ox = -lerp(0, 1000, inCubic(prog(t, 1900, 2200)));          // cassette and film slide away to the left together
+      if (t < 700) s.rrect(88, 280, 124, 10, 5, P.SHADE);
       if (t >= 700) {
-        const endX = lerp(210, 764, inOut(prog(t, 800, 1500)));
-        const sm = t < 800 ? 0 : smearFor(endX - lerp(210, 764, inOut(prog(t - 33 > 800 ? t - 33 : 800, 800, 1500))), PITCH, 60);
-        s.oy = 248 + fall;
-        drawLeader(s, film, 206, endX, sm, true);
+        const endX = lerp(212, 764, inOut(prog(t, 800, 1500)));
+        const sm = t < 800 ? 0 : smearFor(endX - lerp(212, 764, inOut(prog(t - 33 > 800 ? t - 33 : 800, 800, 1500))), PITCH, 60);
+        s.oy = 130 + 31;
+        drawBigLeader(s, film, 212, endX, sm);
         s.oy = 0;
       }
       bigCassette(s, 150, ty, film);
-      s.unclip();
+      s.ox = 0; s.unclip();
     } else if (moment === 'roll') {
       s.clip(0, 44, W, 392);
       const circled = options.circled === undefined ? hash32(roll, 5) % 36 : options.circled;

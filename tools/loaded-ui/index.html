@@ -28,10 +28,11 @@
   </div>
   <div class="bar">
     <label>Tier <select id="tier"><option value="1">tier 1 (small views)</option><option value="2">tier 1+2 (adds full screen)</option></select></label>
-    <label>Tab and counter <select id="tabmode"><option value="always">always</option><option value="peek">peek</option></select></label>
+    <label>Tab <select id="tabmode"><option value="peek" selected>peek</option><option value="always">always</option></select></label>
+    <label>Counter <select id="cntmode"><option value="always" selected>always</option><option value="peek">peek</option></select></label>
     <label>Photo <select id="photo"></select></label>
     <label>Contact sheet <select id="thumbs"><option value="1">real thumbnails</option><option value="0">no thumbnails</option></select></label>
-    <label><input type="checkbox" id="ph" checked> camera placeholders</label>
+    <label><input type="checkbox" id="ph"> native overlay placeholders</label>
     <label><input type="checkbox" id="zoom"> 2x zoom (inspection only; 1:1 is the truth)</label>
   </div>
   <div class="bar">
@@ -40,7 +41,7 @@
     <span id="status"></span>
   </div>
   <canvas id="screen" width="720" height="480"></canvas>
-  <p class="note">Browser simulation of the reference renderer, composited in JS over a still photo. Not a camera result. Magenta boxes are guesses for the camera's own overlay; their position is unverified.</p>
+  <p class="note">Browser simulation of the reference renderer, composited in JS over a still photo. Not a camera result. Magenta boxes (toggle) mark the camera's own overlay, approximately: live view and load use the owner's live-view photo, shot and end of roll use the review-screen reference photo. Edges are good to about 6 px.</p>
   <details><summary>Photo credits</summary><pre id="credits"></pre></details>
 </main>
 <script type="module" src="/src/lab.mjs"></script>

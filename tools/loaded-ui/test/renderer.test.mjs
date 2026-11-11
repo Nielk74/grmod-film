@@ -126,8 +126,8 @@ test('counter roll: 9 to 10 rolls both wheels, 36 to 1 holds at the end, wheels 
   const at = (frame, t, m = 'shot') => { r.render(m, f, frame, 1, t, { tier: 1, tabMode: 'always' }); return counter(); };
   const before = at(9, 0), mid = at(9, 710), after = at(9, 1000);
   assert.notDeepEqual(before, mid); assert.notDeepEqual(mid, after);
-  const tensRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 9; x < 39; x++) o.push(a[y * 84 + x]); return o; };
-  const onesRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 45; x < 75; x++) o.push(a[y * 84 + x]); return o; };
+  const tensRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 9; x < 39; x++) o.push(a[y * 108 + x]); return o; };
+  const onesRegion = a => { const o = []; for (let y = 4; y < 44; y++) for (let x = 45; x < 75; x++) o.push(a[y * 108 + x]); return o; };
   assert.notDeepEqual(tensRegion(before), tensRegion(after), 'tens wheel goes from blank to 1');
   assert.notDeepEqual(onesRegion(before), onesRegion(after));
   // 9 -> 10 must show the same pixels as a static 10
@@ -164,7 +164,7 @@ test('peek mode: hidden by default, slides in, shown, slides out, gone; always m
 });
 
 test('views: tier 1 memory around 300 KB, every view rectangle on the 720x480 screen', () => {
-  assert.equal(tier1Bytes(), 298240);
+  assert.equal(tier1Bytes(), 302848);
   assert.equal(tier2Bytes(), 1382400);
   for (const v of VIEWS) assert.ok(v.x >= 0 && v.y >= 0 && v.x + v.w <= 720 && v.y + v.h <= 480, v.id);
 });

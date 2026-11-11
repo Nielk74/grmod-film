@@ -1,7 +1,7 @@
 import { createRenderer, SHEET } from './renderer.mjs';
 import { compositeInto } from './compose.mjs';
 import { FILMS, ROLL_LENGTH } from './films.mjs';
-import { PLACEHOLDERS, REVIEW_PLACEHOLDERS, duration, W, H } from './plan.mjs';
+import { PLACEHOLDERS, PLACEHOLDER_SET_NAME, REVIEW_PLACEHOLDERS, duration, W, H } from './plan.mjs';
 import credits from '../../../ui/src/assets/samples/CREDITS.md?raw';
 
 const photos = import.meta.glob('../../../ui/src/assets/samples/*.jpg', { eager: true, query: '?url', import: 'default' });
@@ -39,7 +39,7 @@ async function loadPhoto(url) {
   }
 }
 
-const st = { moment: 'live', start: 0, frame: 1, roll: 12, paused: false, pausedAt: 0, peekStart: -1e9 };
+const st = { moment: 'live', start: 0, frame: 1, roll: 12, paused: false, pausedAt: 0, peekStart: performance.now() };
 const clock = () => performance.now();
 function startMoment(m) {
   const f = FILMS[+$('film').value];
@@ -73,21 +73,22 @@ function tick() {
   if (st.moment !== 'live' && el >= duration(st.moment, f)) { finishMoment(); el = 0; }
   if (st.moment !== 'live' && !st.paused) $('scrub').value = el;
   const pe = n - st.peekStart;
-  const opts = { tier: +$('tier').value, tabMode: $('tabmode').value, peekElapsed: pe < 5000 ? pe : -1,
+  const d = new Date(), opts = { tier: +$('tier').value, tabMode: $('tabmode').value, counterMode: $('cntmode').value, date: { month: d.getMonth(), year: d.getFullYear() % 100 }, peekElapsed: pe < 5000 ? pe : -1,
     thumbs: $('thumbs').value === '1' ? thumbs : null };
   buf.set(base);
-  if ($('ph').checked && st.moment === 'shot') for (const p of REVIEW_PLACEHOLDERS) { /* under the overlays, so a row that peeks out during the slide shows */ for (let x = p.x; x < p.x + p.w; x++) { buf[p.y * W + x] = 0xffff00ff; buf[(p.y + p.h - 1) * W + x] = 0xffff00ff; } for (let y = p.y; y < p.y + p.h; y++) { buf[y * W + p.x] = 0xffff00ff; buf[y * W + p.x + p.w - 1] = 0xffff00ff; } }
+  if ($('ph').checked && (st.moment === 'shot' || st.moment === 'roll')) for (const p of REVIEW_PLACEHOLDERS) { /* under the overlays, so a row that peeks out during the slide shows */ for (let x = p.x; x < p.x + p.w; x++) { buf[p.y * W + x] = 0xffff00ff; buf[(p.y + p.h - 1) * W + x] = 0xffff00ff; } for (let y = p.y; y < p.y + p.h; y++) { buf[y * W + p.x] = 0xffff00ff; buf[y * W + p.x + p.w - 1] = 0xffff00ff; } }
   compositeInto(buf, r.render(st.moment, f.index, st.frame, st.roll, el, opts));
   octx.putImageData(image, 0, 0);
   ctx.drawImage(off, 0, 0);
-  if ($('ph').checked && st.moment !== 'shot') {
+  if ($('ph').checked && st.moment !== 'shot' && st.moment !== 'roll') {
     ctx.strokeStyle = '#f0f'; ctx.fillStyle = '#f0f'; ctx.font = '12px monospace';
     for (const p of PLACEHOLDERS) {
       ctx.strokeRect(p.x + .5, p.y + .5, p.w - 1, p.h - 1);
-      ctx.fillText(p.w > 400 ? 'PLACEHOLDER: CAMERA INFO ROW (UNVERIFIED)' : 'PLACEHOLDER', p.x + 4, p.y + 14);
+      if (p.label.length * 7 < p.w) ctx.fillText(p.label, p.x + 4, p.y + 14);
     }
   }
-  $('status').textContent = `${st.moment} ${Math.round(el)} ms  frame ${st.frame}  roll ${st.roll}  ${f.name}`;
+  const set = !$('ph').checked ? '' : (st.moment === 'shot' || st.moment === 'roll') ? '  [placeholders: review screen, reference photo, approx.]' : `  [placeholders: ${PLACEHOLDER_SET_NAME}]`;
+  $('status').textContent = `${st.moment} ${Math.round(el)} ms  frame ${st.frame}  roll ${st.roll}  ${f.name}${set}`;
   requestAnimationFrame(tick);
 }
 fit(); addEventListener('resize', fit);
