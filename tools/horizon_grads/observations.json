@@ -1,0 +1,9 @@
+{
+  "method": "Manual visual picks on exact 2000-long rendered source PNGs; no fitting of metadata offsets, units or signs to these observations. Points are normalized upright image coordinates. Picks concern distant flat-water boundaries, not mountain skylines. These are approximate scene references, not an instrumented horizon calibration.",
+  "observations": [
+    {"id": "Ricoh-AK000069", "points_uv": [[0.3701851, 0.3078078], [0.4252126, 0.3078078]], "picking_uncertainty_px_at_2000": 3, "interpretation": "Distant lake waterline; landscape; finite shore distance unknown"},
+    {"id": "Ricoh-AK000071", "points_uv": [[0.3751876, 0.2882883], [0.5252626, 0.2882883]], "picking_uncertainty_px_at_2000": 3, "interpretation": "Distant lake waterline; landscape; finite shore distance unknown"},
+    {"id": "Ricoh-AK000073", "points_uv": [[0.3753754, 0.3526763], [0.6006006, 0.3526763]], "picking_uncertainty_px_at_2000": 3, "interpretation": "Distant lake waterline; portrait EXIF8; finite shore distance unknown"},
+    {"id": "Ricoh-AK000079", "points_uv": [[0.2252252, 0.2166083], [0.7507508, 0.1930965]], "picking_uncertainty_px_at_2000": 5, "interpretation": "Tilted near shore disagrees; local shoreline is not the earth horizon"}
+  ]
+}

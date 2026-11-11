@@ -1,0 +1,20 @@
+{
+  "selection_basis": "Actual local JPEGs selected from the full 194-file audit for daylight, roll, pitch, EXIF rotation, digital crop and failure cases. Selection is aesthetic coverage, not a random sample or quality score.",
+  "sources": [
+    {"id": "Ricoh-AK000069", "purpose": "Lake landscape; negative pitch; mountain shoreline is not an earth-horizon calibration"},
+    {"id": "Ricoh-AK000071", "purpose": "Lake landscape; deeper blue at thumbnail size"},
+    {"id": "Ricoh-AK000073", "purpose": "Lake portrait; EXIF quarter-turn and negative pitch"},
+    {"id": "Ricoh-AK000079", "purpose": "Visible roll of 10.5 degrees and strongly downward pitch"},
+    {"id": "Ricoh-AK000080", "purpose": "Daylight park; sky above trees"},
+    {"id": "Ricoh-AK000063", "purpose": "Upward pitch; dark trees protrude into the sky; plain vs brightness weight"},
+    {"id": "Ricoh-AK000098", "purpose": "Portrait street; upward pitch; poles and buildings are affected above the horizon"},
+    {"id": "Ricoh-AK000059", "purpose": "Indoor ceiling and window; deliberate no-sky failure that needs Off"},
+    {"id": "Ricoh-AK000103", "purpose": "Strong downward pitch at food; fade and out-of-frame horizon"},
+    {"id": "Ricoh-AK000087", "purpose": "Strongly tilted indoor concert; not sky segmentation"},
+    {"id": "Ricoh2-AK000010", "purpose": "Actual 35mm digital crop; stored 4800x3200 geometry"},
+    {"id": "Ricoh2-AK000015", "purpose": "35mm digital crop pointed upward; buildings cannot be protected by geometry"},
+    {"id": "Ricoh2-AK000025", "purpose": "35mm digital crop at sunset; colour filters and Portra illustration"},
+    {"id": "Ricoh-R0000022", "purpose": "State-zero level record; conservative no-op pending field semantics"},
+    {"id": "Ricoh-AK000065-edited", "purpose": "MakerNotes removed; mandatory no-op"}
+  ]
+}
