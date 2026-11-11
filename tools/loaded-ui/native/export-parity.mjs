@@ -55,7 +55,7 @@ for (const f of [idx('Portra 400'), idx('Velvia'), idx('Eterna'), idx('Instant')
   for (const t of [0, 150, 300, 420, 560, 700, 860, 1000, 1250, 1400]) add({ moment: 'shot', film: f, frame, tier, t, key: `fn ${f} ${frame} ${tier} ${t}` });
 for (const f of [idx('Portra 400'), idx('CineStill 800T')]) for (const t of steps(260, 700, 33)) add({ moment: 'shot', film: f, frame: 36, tier: 1, t });
 // 5. date stamp on the slide mount, roll numbers and circled frames on the sheet
-for (const f of [idx('Velvia'), idx('Kodachrome 64')]) for (const [month, year] of [[0, 0], [5, 26], [11, 99], [9, 7]]) for (const t of [300, 700]) add({ moment: 'shot', film: f, frame: 17, tier: 1, t, month, year });
+for (const f of [idx('Velvia'), idx('Kodachrome 64')]) for (const [month, year] of [[0, 0], [5, 26], [11, 99], [9, 7], [12, 0]]) for (const t of [300, 700]) add({ moment: 'shot', film: f, frame: 17, tier: 1, t, month, year });
 for (const roll of [0, 1, 12, 999999]) for (const circled of [-1, 0, 17, 35]) for (const t of [1600, 1900, 2300]) add({ moment: 'roll', film: idx('Portra 400'), frame: 36, tier: 2, t, roll, circled, thumbs: roll === 12 ? 1 : 0 });
 // 6. furniture hidden/shown through the moments in peek modes (tab aside, hand-off)
 for (const [tm, cm] of [[0, 0], [1, 1]]) for (const m of ['shot', 'load', 'roll']) for (const f of [idx('Instant'), idx('Velvia'), idx('Portra 400')]) for (const tier of [1, 2])
@@ -66,7 +66,7 @@ const HASHES = (c, dump) => {
   const views = r.render(c.moment, c.film, c.frame, c.roll, c.t, { tier: c.tier,
     tabMode: c.tabMode === 1 ? 'peek' : 'always', counterMode: c.counterMode === 2 ? undefined : (c.counterMode === 1 ? 'peek' : 'always'),
     peekElapsed: c.peek, tabPeekElapsed: c.tabPeek === -2 ? undefined : c.tabPeek, counterPeekElapsed: c.counterPeek === -2 ? undefined : c.counterPeek,
-    date: { month: c.month, year: c.year }, thumbs: c.thumbs ? thumbViews : null, circled: c.circled < 0 ? undefined : c.circled });
+    date: c.month === 12 ? null : { month: c.month, year: c.year }, thumbs: c.thumbs ? thumbViews : null, circled: c.circled < 0 ? undefined : c.circled });
   if (dump) return views;
   return views.map(v => zlib.crc32(Buffer.from(v.rgba.buffer, v.rgba.byteOffset, v.rgba.byteLength)));
 };

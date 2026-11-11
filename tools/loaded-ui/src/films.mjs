@@ -23,5 +23,9 @@ export const FILMS = LOOKS.map((l, i) => {
   return { index: i, name: l.name, group: l.group, caption: (TEXT[l.name] || l).caption, code: (TEXT[l.name] || l).code, kind, edge,
     panel: l.panel, band: l.band, ink: l.ink, captionInk: l.captionInk, label: l.name.toUpperCase() };
 });
+/** The camera's own looks (Standard, Vivid, ...) and any film this table does not know: a neutral negative strip. */
+FILMS.push({ index: FILMS.length, name: 'GR III', group: 'camera', caption: 'GR III', code: 'STD', kind: 'neg', edge: [236, 236, 230],
+  panel: [58, 60, 66], band: [150, 152, 158], ink: [255, 255, 255], captionInk: [24, 24, 28], label: 'GR III' });
+export const NEUTRAL_FILM = FILMS.length - 1;
 export const FOCUS = ['Portra 400', 'Gold 200', 'CineStill 800T'].map(n => FILMS.findIndex(f => f.name === n));
 export const ROLL_LENGTH = 36;

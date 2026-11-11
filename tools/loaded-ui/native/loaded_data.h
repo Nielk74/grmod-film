@@ -3,7 +3,7 @@
 #define LOADED_DATA_H
 #include <stdint.h>
 
-#define LD_FILMS 20
+#define LD_FILMS 21
 #define LD_ROLL_LENGTH 36
 #define LD_PEEK_MS 2000
 #define LD_SHOT_NEG 1500
@@ -58,7 +58,7 @@ static const ld_view ld_views[5] = {
 };
 
 typedef struct { const char *label, *caption, *code; uint8_t label_len, kind; uint8_t edge[3], panel[3], band[3], ink[3], cink[3]; } ld_film;
-static const ld_film ld_films[20] = {
+static const ld_film ld_films[21] = {
   { "VELVIA", "VELVIA", "V", 6, 2, {255,214,64}, {32,86,160}, {62,150,72}, {255,214,64}, {255,255,255} }, /* Velvia */
   { "ASTIA", "ASTIA", "A", 5, 2, {255,255,255}, {196,92,132}, {62,150,72}, {255,255,255}, {255,255,255} }, /* Astia */
   { "CLASSIC CHROME", "CLASSIC", "CC", 14, 2, {242,232,206}, {118,108,92}, {196,80,44}, {242,232,206}, {255,255,255} }, /* Classic Chrome */
@@ -79,6 +79,7 @@ static const ld_film ld_films[20] = {
   { "INSTANT", "INSTANT", "IN", 7, 3, {40,40,40}, {236,230,214}, {60,140,160}, {40,40,40}, {255,255,255} }, /* Instant */
   { "BLOCKBUSTER", "CINEMA", "TO", 11, 4, {255,178,70}, {20,96,110}, {236,120,40}, {255,170,80}, {255,255,255} }, /* Blockbuster */
   { "PLATINUM", "PLATINUM", "PT", 8, 1, {236,236,230}, {60,64,76}, {196,170,130}, {240,226,200}, {40,36,30} }, /* Platinum */
+  { "GR III", "GR III", "STD", 6, 0, {236,236,230}, {58,60,66}, {150,152,158}, {255,255,255}, {24,24,28} }, /* GR III */
 };
 
 /* 5x7 font: 45 glyphs x 7 rows (bit 4 = left column); ld_font_index maps a char code to a glyph or -1 */

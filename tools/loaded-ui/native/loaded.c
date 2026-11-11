@@ -301,8 +301,10 @@ static void draw_mount_band(surf *s, int top, const ld_film *f, int32_t frame, u
     s_rect(s, 0, 0, 14, 14, P_PAPER); s_disc(s, 14, 0, 14, P_T);
     s_rect(s, W - 14, 0, 14, 14, P_PAPER); s_disc(s, W - 15, 0, 14, P_T);
     x = 24 + s_num(s, (uint32_t)frame, 24, 17, 3, P_INK, 0) + 24;
-    for (i = 0; i < 3; i++) { s_glyph(s, (uint8_t)ld_months[month * 3 + (uint32_t)i], x, 17, 3, P_RED); x += 18; }
-    s_num(s, year, x + 18, 17, 3, P_RED, 2);
+    if (month < 12) { /* month 12 = no date stamp */
+      for (i = 0; i < 3; i++) { s_glyph(s, (uint8_t)ld_months[month * 3 + (uint32_t)i], x, 17, 3, P_RED); x += 18; }
+      s_num(s, year, x + 18, 17, 3, P_RED, 2);
+    }
     s_text(s, f->caption, W - 24 - text_w(f->caption, 2), 20, 2, P_INK);
   }
 }
@@ -718,7 +720,7 @@ static int params_ok(const loaded_params *p, int need_moment) {
   if (p->film >= LD_FILMS || p->frame < 1 || p->frame > LD_ROLL_LENGTH || p->roll > 999999u) return 0;
   if (p->tier != 1 && p->tier != 2) return 0;
   if (p->tab_mode > LOADED_PEEK || p->counter_mode > LOADED_INHERIT) return 0;
-  if (p->month > 11 || p->year > 99) return 0;
+  if (p->month > 12 || p->year > 99) return 0;
   if (p->circled < -1 || p->circled > 35) return 0;
   return 1;
 }

@@ -159,9 +159,11 @@ function drawMountBand(s, top, film, frame, date) {
     s.rect(0, 0, 14, 14, P.PAPER); s.disc(14, 0, 14, P.T);
     s.rect(W - 14, 0, 14, 14, P.PAPER); s.disc(W - 15, 0, 14, P.T);
     let x = 24 + s.num(frame, 24, 17, 3, P.INK) + 24;
-    // printed date-style stamp: month (0..11) and two-digit year come from the caller
-    for (let i = 0; i < 3; i++) { s.glyph(MONTHS.charCodeAt(date.month * 3 + i), x, 17, 3, P.RED); x += 18; }
-    s.num(date.year, x + 18, 17, 3, P.RED, 2);
+    // printed date-style stamp: month (0..11) and two-digit year come from the caller; null = no stamp
+    if (date) {
+      for (let i = 0; i < 3; i++) { s.glyph(MONTHS.charCodeAt(date.month * 3 + i), x, 17, 3, P.RED); x += 18; }
+      s.num(date.year, x + 18, 17, 3, P.RED, 2);
+    }
     s.text(film.caption, W - 24 - s.textWidth(film.caption, 2), 20, 2, P.INK);
   }
 }
@@ -405,7 +407,7 @@ export function createRenderer({ guard = 0 } = {}) {
     const dur = duration(moment, film);
     const active = (moment === 'shot' || moment === 'load' || moment === 'roll') && elapsed >= 0 && elapsed < dur;
     const t = elapsed < 0 ? 0 : elapsed, last = frame >= ROLL_LENGTH, kind = film.kind;
-    const date = options.date || DEFAULT_DATE;
+    const date = options.date === undefined ? DEFAULT_DATE : options.date; // null: no stamp
     mlv.lo = 0; mlv.hi = 0; mlv.frac = 0;
     if (active && moment === 'shot' && kind === 'instant') milk(t);
     fillPalette(pal, film, mlv.lo, mlv.hi);

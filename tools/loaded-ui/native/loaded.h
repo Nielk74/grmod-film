@@ -36,7 +36,7 @@ typedef struct {
   int32_t peek_ms;        /* ms since the last peek trigger, -1 = none (render only; tick derives it) */
   int32_t tab_peek_ms;    /* -2 = use peek_ms */
   int32_t counter_peek_ms;/* -2 = use peek_ms */
-  uint32_t month;         /* 0..11, for the slide mount's date stamp */
+  uint32_t month;         /* 0..11 for the slide mount's date stamp, 12 = no stamp */
   uint32_t year;          /* 0..99 */
   const uint32_t *thumbs; /* 36 contiguous 64x42 RGBA thumbnails, or NULL for plain tiles */
   int32_t circled;        /* frame index (0..35) to ring with grease pencil, -1 = derived from the roll */

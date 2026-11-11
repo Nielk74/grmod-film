@@ -78,9 +78,9 @@ def run_robustness(emu, cases):
 
     # ---- 2. invalid inputs leave every view transparent and write nothing out of bounds
     bad = [
-        ('film 20', dict(film=20)), ('film huge', dict(film=0xffffffff)), ('frame 0', dict(frame=0)), ('frame 37', dict(frame=37)),
+        ('film 21', dict(film=21)), ('film huge', dict(film=0xffffffff)), ('frame 0', dict(frame=0)), ('frame 37', dict(frame=37)),
         ('moment 5', dict(momentId=5)), ('moment huge', dict(momentId=0xffff)), ('tier 0', dict(tier=0)), ('tier 3', dict(tier=3)),
-        ('roll 1e6', dict(roll=1000000)), ('month 12', dict(month=12)), ('year 100', dict(year=100)), ('circled 36', dict(circled=36)),
+        ('roll 1e6', dict(roll=1000000)), ('month 13', dict(month=13)), ('year 100', dict(year=100)), ('circled 36', dict(circled=36)),
         ('circled -2', dict(circled=-2)), ('tab mode 2', dict(tabMode=2)), ('counter mode 3', dict(counterMode=3)),
     ]
     for name, kw in bad:

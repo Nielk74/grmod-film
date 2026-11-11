@@ -14,7 +14,7 @@ const stepsFor = d => { const a = []; for (let t = 0; t < d; t += 33) a.push(t);
 
 test('every film and moment renders in both tiers, and is non-empty mid-moment', () => {
   const r = createRenderer();
-  assert.equal(FILMS.length, 20);
+  assert.equal(FILMS.length, 21);
   for (const f of FILMS) for (const tier of [1, 2]) for (const m of MOVING) {
     const d = duration(m, f);
     let drawn = 0;

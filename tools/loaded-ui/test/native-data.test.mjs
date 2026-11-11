@@ -27,5 +27,5 @@ test('loaded.c is freestanding: no libc headers, no floating point, no allocatio
 test('the generated header carries the view plan the renderer uses', () => {
   const h = readFileSync(ROOT + 'native/loaded_data.h', 'utf8');
   assert.match(h, /#define LD_VIEW_RECTS \{ \{ 0, 0, 720, 480 \}, \{ 0, 0, 720, 44 \}, \{ 0, 436, 720, 44 \}, \{ 612, 380, 108, 48 \}, \{ 0, 376, 128, 56 \} \}/);
-  assert.match(h, /#define LD_FILMS 20/);
+  assert.match(h, /#define LD_FILMS 21/);
 });
