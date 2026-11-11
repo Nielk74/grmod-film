@@ -1,0 +1,16 @@
+{
+  "name": "grmod-loaded-ui-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5190 --strictPort",
+    "build": "vite build",
+    "test": "node --test test/*.test.mjs",
+    "gen:films": "node gen-films.mjs",
+    "review": "node make-review.mjs"
+  },
+  "devDependencies": {
+    "sharp": "0.34.5",
+    "vite": "5.4.21"
+  }
+}
