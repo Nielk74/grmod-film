@@ -7,7 +7,10 @@
     "build": "vite build",
     "test": "node --test test/*.test.mjs",
     "gen:films": "node gen-films.mjs",
-    "review": "node make-review.mjs"
+    "review": "node make-review.mjs",
+    "gen:native": "node gen-native.mjs",
+    "native": "python native/check_loaded.py",
+    "native:cost": "python native/cost_loaded.py"
   },
   "devDependencies": {
     "sharp": "0.34.5",
