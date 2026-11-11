@@ -1,0 +1,557 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-04T22:14:39.447Z",
+  "title": "Design System: Shutter studies",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "tonalRamp": [
+          "oklch(15% 0.0046 91.5)",
+          "oklch(25% 0.0077 91.5)",
+          "oklch(36% 0.0111 91.5)",
+          "oklch(47% 0.0124 91.5)",
+          "oklch(59% 0.0124 91.5)",
+          "oklch(71% 0.0124 91.5)",
+          "oklch(83% 0.0084 91.5)",
+          "oklch(95% 0.0025 91.5)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0062 183.9)",
+          "oklch(25% 0.0104 183.9)",
+          "oklch(36% 0.0150 183.9)",
+          "oklch(47% 0.0166 183.9)",
+          "oklch(59% 0.0166 183.9)",
+          "oklch(71% 0.0166 183.9)",
+          "oklch(83% 0.0113 183.9)",
+          "oklch(95% 0.0033 183.9)"
+        ]
+      },
+      "vermilion": {
+        "role": "primary",
+        "displayName": "Vermilion",
+        "tonalRamp": [
+          "oklch(15% 0.0521 34.2)",
+          "oklch(25% 0.0868 34.2)",
+          "oklch(36% 0.1249 34.2)",
+          "oklch(47% 0.1388 34.2)",
+          "oklch(59% 0.1388 34.2)",
+          "oklch(71% 0.1388 34.2)",
+          "oklch(83% 0.0944 34.2)",
+          "oklch(95% 0.0278 34.2)"
+        ]
+      },
+      "quiet": {
+        "role": "neutral",
+        "displayName": "Quiet",
+        "tonalRamp": [
+          "oklch(15% 0.0066 136.2)",
+          "oklch(25% 0.0111 136.2)",
+          "oklch(36% 0.0159 136.2)",
+          "oklch(47% 0.0177 136.2)",
+          "oklch(59% 0.0177 136.2)",
+          "oklch(71% 0.0177 136.2)",
+          "oklch(83% 0.0120 136.2)",
+          "oklch(95% 0.0035 136.2)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "tonalRamp": [
+          "oklch(15% 0.0082 106.9)",
+          "oklch(25% 0.0136 106.9)",
+          "oklch(36% 0.0196 106.9)",
+          "oklch(47% 0.0218 106.9)",
+          "oklch(59% 0.0218 106.9)",
+          "oklch(71% 0.0218 106.9)",
+          "oklch(83% 0.0148 106.9)",
+          "oklch(95% 0.0044 106.9)"
+        ]
+      },
+      "preview": {
+        "role": "neutral",
+        "displayName": "Preview",
+        "tonalRamp": [
+          "oklch(15% 0.0050 102.0)",
+          "oklch(25% 0.0084 102.0)",
+          "oklch(36% 0.0121 102.0)",
+          "oklch(47% 0.0134 102.0)",
+          "oklch(59% 0.0134 102.0)",
+          "oklch(71% 0.0134 102.0)",
+          "oklch(83% 0.0091 102.0)",
+          "oklch(95% 0.0027 102.0)"
+        ]
+      },
+      "button-cream": {
+        "role": "neutral",
+        "displayName": "Button Cream",
+        "tonalRamp": [
+          "oklch(15% 0.0144 83.8)",
+          "oklch(25% 0.0240 83.8)",
+          "oklch(36% 0.0346 83.8)",
+          "oklch(47% 0.0384 83.8)",
+          "oklch(59% 0.0384 83.8)",
+          "oklch(71% 0.0384 83.8)",
+          "oklch(83% 0.0261 83.8)",
+          "oklch(95% 0.0077 83.8)"
+        ]
+      },
+      "button-hover": {
+        "role": "neutral",
+        "displayName": "Button Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0112 166.8)",
+          "oklch(25% 0.0187 166.8)",
+          "oklch(36% 0.0269 166.8)",
+          "oklch(47% 0.0299 166.8)",
+          "oklch(59% 0.0299 166.8)",
+          "oklch(71% 0.0299 166.8)",
+          "oklch(83% 0.0204 166.8)",
+          "oklch(95% 0.0060 166.8)"
+        ]
+      },
+      "active-green": {
+        "role": "secondary",
+        "displayName": "Active Green",
+        "tonalRamp": [
+          "oklch(15% 0.0219 158.9)",
+          "oklch(25% 0.0365 158.9)",
+          "oklch(36% 0.0525 158.9)",
+          "oklch(47% 0.0583 158.9)",
+          "oklch(59% 0.0583 158.9)",
+          "oklch(71% 0.0583 158.9)",
+          "oklch(83% 0.0397 158.9)",
+          "oklch(95% 0.0117 158.9)"
+        ]
+      },
+      "active-paper": {
+        "role": "secondary",
+        "displayName": "Active Paper",
+        "tonalRamp": [
+          "oklch(15% 0.0101 133.0)",
+          "oklch(25% 0.0168 133.0)",
+          "oklch(36% 0.0242 133.0)",
+          "oklch(47% 0.0268 133.0)",
+          "oklch(59% 0.0268 133.0)",
+          "oklch(71% 0.0268 133.0)",
+          "oklch(83% 0.0183 133.0)",
+          "oklch(95% 0.0054 133.0)"
+        ]
+      },
+      "camera-case": {
+        "role": "neutral",
+        "displayName": "Camera Case",
+        "tonalRamp": [
+          "oklch(15% 0.0018 248.0)",
+          "oklch(25% 0.0029 248.0)",
+          "oklch(36% 0.0042 248.0)",
+          "oklch(47% 0.0047 248.0)",
+          "oklch(59% 0.0047 248.0)",
+          "oklch(71% 0.0047 248.0)",
+          "oklch(83% 0.0032 248.0)",
+          "oklch(95% 0.0009 248.0)"
+        ]
+      },
+      "lcd-dark": {
+        "role": "neutral",
+        "displayName": "Lcd Dark",
+        "tonalRamp": [
+          "oklch(15% 0.0060 160.6)",
+          "oklch(25% 0.0100 160.6)",
+          "oklch(36% 0.0144 160.6)",
+          "oklch(47% 0.0160 160.6)",
+          "oklch(59% 0.0160 160.6)",
+          "oklch(71% 0.0160 160.6)",
+          "oklch(83% 0.0109 160.6)",
+          "oklch(95% 0.0032 160.6)"
+        ]
+      },
+      "lcd-cream": {
+        "role": "neutral",
+        "displayName": "Lcd Cream",
+        "tonalRamp": [
+          "oklch(15% 0.0088 88.2)",
+          "oklch(25% 0.0147 88.2)",
+          "oklch(36% 0.0212 88.2)",
+          "oklch(47% 0.0235 88.2)",
+          "oklch(59% 0.0235 88.2)",
+          "oklch(71% 0.0235 88.2)",
+          "oklch(83% 0.0160 88.2)",
+          "oklch(95% 0.0047 88.2)"
+        ]
+      },
+      "phosphor": {
+        "role": "primary",
+        "displayName": "Phosphor",
+        "tonalRamp": [
+          "oklch(15% 0.0932 132.6)",
+          "oklch(25% 0.1553 132.6)",
+          "oklch(36% 0.2236 132.6)",
+          "oklch(47% 0.2484 132.6)",
+          "oklch(59% 0.2484 132.6)",
+          "oklch(71% 0.2484 132.6)",
+          "oklch(83% 0.1689 132.6)",
+          "oklch(95% 0.0497 132.6)"
+        ]
+      },
+      "flash": {
+        "role": "primary",
+        "displayName": "Flash",
+        "tonalRamp": [
+          "oklch(15% 0.0719 122.5)",
+          "oklch(25% 0.1198 122.5)",
+          "oklch(36% 0.1725 122.5)",
+          "oklch(47% 0.1917 122.5)",
+          "oklch(59% 0.1917 122.5)",
+          "oklch(71% 0.1917 122.5)",
+          "oklch(83% 0.1303 122.5)",
+          "oklch(95% 0.0383 122.5)"
+        ]
+      },
+      "glass": {
+        "role": "neutral",
+        "displayName": "Glass",
+        "tonalRamp": [
+          "oklch(15% 0.0125 163.3)",
+          "oklch(25% 0.0208 163.3)",
+          "oklch(36% 0.0299 163.3)",
+          "oklch(47% 0.0332 163.3)",
+          "oklch(59% 0.0332 163.3)",
+          "oklch(71% 0.0332 163.3)",
+          "oklch(83% 0.0226 163.3)",
+          "oklch(95% 0.0066 163.3)"
+        ]
+      },
+      "portal-depth": {
+        "role": "neutral",
+        "displayName": "Portal Depth",
+        "tonalRamp": [
+          "oklch(15% 0.0244 156.2)",
+          "oklch(25% 0.0407 156.2)",
+          "oklch(36% 0.0586 156.2)",
+          "oklch(47% 0.0651 156.2)",
+          "oklch(59% 0.0651 156.2)",
+          "oklch(71% 0.0651 156.2)",
+          "oklch(83% 0.0443 156.2)",
+          "oklch(95% 0.0130 156.2)"
+        ]
+      },
+      "portal-rim": {
+        "role": "neutral",
+        "displayName": "Portal Rim",
+        "tonalRamp": [
+          "oklch(15% 0.0152 162.7)",
+          "oklch(25% 0.0253 162.7)",
+          "oklch(36% 0.0364 162.7)",
+          "oklch(47% 0.0404 162.7)",
+          "oklch(59% 0.0404 162.7)",
+          "oklch(71% 0.0404 162.7)",
+          "oklch(83% 0.0275 162.7)",
+          "oklch(95% 0.0081 162.7)"
+        ]
+      },
+      "orange": {
+        "role": "secondary",
+        "displayName": "Orange",
+        "tonalRamp": [
+          "oklch(15% 0.0825 37.3)",
+          "oklch(25% 0.1375 37.3)",
+          "oklch(36% 0.1979 37.3)",
+          "oklch(47% 0.2199 37.3)",
+          "oklch(59% 0.2199 37.3)",
+          "oklch(71% 0.2199 37.3)",
+          "oklch(83% 0.1495 37.3)",
+          "oklch(95% 0.0440 37.3)"
+        ]
+      },
+      "lemon": {
+        "role": "secondary",
+        "displayName": "Lemon",
+        "tonalRamp": [
+          "oklch(15% 0.0730 106.4)",
+          "oklch(25% 0.1217 106.4)",
+          "oklch(36% 0.1753 106.4)",
+          "oklch(47% 0.1947 106.4)",
+          "oklch(59% 0.1947 106.4)",
+          "oklch(71% 0.1947 106.4)",
+          "oklch(83% 0.1324 106.4)",
+          "oklch(95% 0.0389 106.4)"
+        ]
+      },
+      "hot": {
+        "role": "secondary",
+        "displayName": "Hot",
+        "tonalRamp": [
+          "oklch(15% 0.0100 135.0)",
+          "oklch(25% 0.0167 135.0)",
+          "oklch(36% 0.0241 135.0)",
+          "oklch(47% 0.0268 135.0)",
+          "oklch(59% 0.0268 135.0)",
+          "oklch(71% 0.0268 135.0)",
+          "oklch(83% 0.0182 135.0)",
+          "oklch(95% 0.0054 135.0)"
+        ]
+      },
+      "magenta": {
+        "role": "secondary",
+        "displayName": "Magenta",
+        "tonalRamp": [
+          "oklch(15% 0.1015 338.8)",
+          "oklch(25% 0.1692 338.8)",
+          "oklch(36% 0.2436 338.8)",
+          "oklch(47% 0.2707 338.8)",
+          "oklch(59% 0.2707 338.8)",
+          "oklch(71% 0.2707 338.8)",
+          "oklch(83% 0.1841 338.8)",
+          "oklch(95% 0.0541 338.8)"
+        ]
+      },
+      "ivory": {
+        "role": "neutral",
+        "displayName": "Ivory",
+        "tonalRamp": [
+          "oklch(15% 0.0159 84.6)",
+          "oklch(25% 0.0265 84.6)",
+          "oklch(36% 0.0382 84.6)",
+          "oklch(47% 0.0424 84.6)",
+          "oklch(59% 0.0424 84.6)",
+          "oklch(71% 0.0424 84.6)",
+          "oklch(83% 0.0288 84.6)",
+          "oklch(95% 0.0085 84.6)"
+        ]
+      },
+      "sprite-ink": {
+        "role": "neutral",
+        "displayName": "Sprite Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0050 140.5)",
+          "oklch(25% 0.0083 140.5)",
+          "oklch(36% 0.0119 140.5)",
+          "oklch(47% 0.0132 140.5)",
+          "oklch(59% 0.0132 140.5)",
+          "oklch(71% 0.0132 140.5)",
+          "oklch(83% 0.0090 140.5)",
+          "oklch(95% 0.0026 140.5)"
+        ]
+      },
+      "sprite-shadow": {
+        "role": "neutral",
+        "displayName": "Sprite Shadow",
+        "tonalRamp": [
+          "oklch(15% 0.0103 136.8)",
+          "oklch(25% 0.0172 136.8)",
+          "oklch(36% 0.0247 136.8)",
+          "oklch(47% 0.0275 136.8)",
+          "oklch(59% 0.0275 136.8)",
+          "oklch(71% 0.0275 136.8)",
+          "oklch(83% 0.0187 136.8)",
+          "oklch(95% 0.0055 136.8)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Major page headline; breakpoint-specific sizes are documented in DESIGN.md."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Sequence and concluding section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Introductory explanation."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Study descriptions."
+      },
+      "action": {
+        "displayName": "Action",
+        "purpose": "Primary shutter action and stage replay."
+      },
+      "inspection": {
+        "displayName": "Inspection",
+        "purpose": "Notes, playback controls, personality captions and study metadata."
+      },
+      "supporting": {
+        "displayName": "Supporting",
+        "purpose": "Secondary cues and footer."
+      }
+    },
+    "shadows": [
+      {
+        "name": "camera-frame",
+        "value": "0 8px 16px #202a2417",
+        "purpose": "Diffuse physical separation beneath the camera shell."
+      },
+      {
+        "name": "lcd-readout",
+        "value": "0 1px 3px #000",
+        "purpose": "Text shadow behind camera readouts over photography."
+      }
+    ],
+    "motion": [
+      {
+        "name": "entrance",
+        "value": "1400ms",
+        "purpose": "Authored approach, landing and turn."
+      },
+      {
+        "name": "acting",
+        "value": "5000ms",
+        "purpose": "Complete photo inspection performance."
+      },
+      {
+        "name": "exit",
+        "value": "1200ms",
+        "purpose": "Authored departure and clear."
+      },
+      {
+        "name": "sample-rate",
+        "value": "30fps",
+        "purpose": "Shared transform sampling."
+      },
+      {
+        "name": "default-ease",
+        "value": "power2.out",
+        "purpose": "Paused GSAP object timeline default; individual actions override."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "fixed pose at 5050ms; CSS transitions disabled",
+        "purpose": "Initial preference treatment with explicit full-motion preview."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1450px"
+      },
+      {
+        "name": "compact",
+        "value": "1100px"
+      },
+      {
+        "name": "stacked",
+        "value": "790px"
+      }
+    ],
+    "tonalRampPolicy": "Synthesized OKLCH ramps are preview-only metadata for the design panel. They are not shipped runtime palette colors or additional normative tokens."
+  },
+  "components": [
+    {
+      "name": "Shutter button",
+      "kind": "button",
+      "refersTo": "button-shutter",
+      "description": "Trigger a randomly selected complete shot.",
+      "html": "<button class=\"ds-shutter\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M4 7h4l2-3h4l2 3h4v13H4Z\"/><circle cx=\"12\" cy=\"13\" r=\"4\"/></svg>Take a picture</button>",
+      "css": ".ds-shutter{display:flex;align-items:center;gap:10px;border:0;background:#25312f;color:#fff1d6;padding:13px 17px;border-radius:6px;font:700 12px Arial,sans-serif;cursor:pointer}.ds-shutter svg{width:20px;height:20px}.ds-shutter:hover{background:#3e534a}.ds-shutter:focus-visible{outline:3px solid var(--accent,#af4932);outline-offset:5px}"
+    },
+    {
+      "name": "Stage replay button",
+      "kind": "button",
+      "refersTo": "button-replay",
+      "description": "Replay the selected study after its stage clears.",
+      "html": "<button class=\"ds-replay\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 5 10 7-10 7Z\"/></svg>Replay Pixel Portal</button>",
+      "css": ".ds-replay{display:flex;align-items:center;gap:9px;border:0;padding:12px 16px;background:#25312f;color:#fff1d6;border-radius:5px;font:12px Arial,sans-serif;cursor:pointer}.ds-replay svg{width:20px;height:20px}.ds-replay:hover{background:#3e534a}.ds-replay:focus-visible{outline:3px solid var(--accent,#af4932);outline-offset:5px}"
+    },
+    {
+      "name": "Sequence Play action",
+      "kind": "button",
+      "description": "Ruled action for inspecting a particular transition.",
+      "html": "<button class=\"ds-audition\" aria-pressed=\"true\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 5 10 7-10 7Z\"/></svg><span>Play Pixel Portal</span></button>",
+      "css": ".ds-audition{width:100%;display:flex;align-items:center;gap:7px;text-align:left;background:none;border:0;border-top:1px solid var(--rule,#cdcdbd);padding:16px 0;font:12px Arial,sans-serif;color:var(--accent,#af4932);cursor:pointer}.ds-audition svg{width:15px;height:15px}.ds-audition:hover{color:var(--accent,#af4932)}.ds-audition:focus-visible{outline:3px solid var(--accent,#af4932);outline-offset:5px}"
+    },
+    {
+      "name": "Animation timeline",
+      "kind": "input",
+      "description": "Native range; real application scrubbing pauses motion and sound.",
+      "html": "<input class=\"ds-timeline\" aria-label=\"Animation timeline\" type=\"range\" min=\"0\" max=\"7600\" step=\"10\" value=\"5050\">",
+      "css": ".ds-timeline{width:100%;min-width:80px;height:24px;accent-color:var(--accent,#af4932);cursor:pointer}.ds-timeline:focus-visible{outline:3px solid var(--accent,#af4932);outline-offset:5px}"
+    },
+    {
+      "name": "Review navigation",
+      "kind": "nav",
+      "description": "Small wordmark and source link separated by a full-width rule.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-wordmark\" href=\"#preview\">GR<span>MOD</span><i></i>SHUTTER STUDIES</a><a class=\"ds-source\" href=\"https://github.com/Maxwooow/Ricoh-GRMod\">Made for the little camera<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 18 18 6M6 6h12v12\"/></svg></a></nav>",
+      "css": ".ds-nav{height:92px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--rule,#cdcdbd);gap:20px}.ds-wordmark{display:flex;align-items:center;text-decoration:none;font:700 11px Arial,sans-serif;letter-spacing:1.3px;color:#25312f}.ds-wordmark span{color:var(--accent,#af4932);margin-left:3px}.ds-wordmark i{height:18px;width:1px;background:#92998b;margin:0 19px}.ds-source{font:12px Arial,sans-serif;text-decoration:none;color:var(--quiet,#62695f);text-underline-offset:5px}.ds-source:hover{text-decoration:underline}.ds-nav a:focus-visible{outline:3px solid var(--accent,#af4932);outline-offset:5px}@media(max-width:790px){.ds-source{display:none}}.ds-source svg{width:13px;height:13px;margin-left:10px;vertical-align:middle}"
+    },
+    {
+      "name": "Character review stage",
+      "kind": "card",
+      "refersTo": "preview-stage",
+      "description": "Neutral bounded review area; insert original raster artwork without redrawing it.",
+      "html": "<div class=\"ds-stage\" role=\"img\" aria-label=\"Neutral character inspection stage\"></div>",
+      "css": ".ds-stage{height:284px;position:relative;display:grid;place-items:center;background:#e8e7dd;border-radius:12px;margin-bottom:20px;overflow:hidden}"
+    },
+    {
+      "name": "Camera frame",
+      "kind": "custom",
+      "refersTo": "camera-shell",
+      "description": "Structural frame preview; photographic content and real raster mascot remain application assets.",
+      "html": "<div class=\"ds-camera\"><div class=\"ds-top\"><span>GR</span></div><div class=\"ds-lcd\" aria-label=\"Camera LCD content area\"></div><div class=\"ds-chin\">RICOH<i></i>III</div></div>",
+      "css": ".ds-camera{background:#252729;border-radius:12px;padding:12px 12px 0;box-shadow:0 8px 16px #202a2417}.ds-top{display:flex;align-items:center;height:25px;padding:0 1px 8px}.ds-top span{font:italic 700 18px Arial,sans-serif;color:#c6c7c1;letter-spacing:-1px}.ds-lcd{position:relative;aspect-ratio:3/2;overflow:hidden;background:#1a231e;border-radius:3px}.ds-chin{height:28px;display:flex;align-items:center;color:#92968e;font:7px Arial,sans-serif;letter-spacing:1.5px;padding:0 3px;gap:15px}.ds-chin i{height:1px;background:#4c5150;flex:1}@media(max-width:790px){.ds-top{height:30px}.ds-chin{height:32px}}"
+    },
+    {
+      "name": "Active sequence badge",
+      "kind": "chip",
+      "description": "Noninteractive text state; accompanies the selected heading color.",
+      "html": "<span class=\"ds-active\">ACTIVE</span>",
+      "css": ".ds-active{font:700 10px Arial,sans-serif;letter-spacing:.7px;color:#38604a;background:#d9e4d2;padding:5px 7px;border-radius:3px}@media(max-width:1100px){.ds-active{padding:4px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A small CRT with excessive enthusiasm",
+    "overview": "The original charcoal CRT, crooked antenna, ivory gloves, orange sneakers and tiny photograph carry the expression. Its ink outlines and raster geometry remain the visual identity. Acid-lime phosphor and saturated geometric effects make its actions readable against both a quiet review stage and a photograph.\n\nThe inspection page is warm, spare and orderly: condensed display lettering, dark green-black text, ruled controls and restrained vermilion. The page supplies a calm frame for an animated character whose anticipation, mishaps and recovery supply the humor. Preserve the approved artwork and choreography when extending this system.",
+    "keyCharacteristics": [
+      "Original outlined raster character with neon color baked into its assets.",
+      "Warm neutral stages and a dark simulated camera frame.",
+      "Condensed display type paired with plain functional body text.",
+      "Three authored arrivals and departures sharing one five-second performance.",
+      "One inspection clock for pictures, bounded effects and sound."
+    ],
+    "rules": [
+      {
+        "name": "The Baked Color Rule",
+        "body": "Grade the raster color channels while preserving source registration and alpha; keep original masters. Reuse the shared neon palette for geometric effects. Do not add glow or runtime image filtering.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "Keep Barlow for major headings and Arial for explanations, measurements and controls.",
+        "section": "typography"
+      },
+      {
+        "name": "The Material Depth Rule",
+        "body": "Keep depth tied to the camera, photograph readability and the character's physical action; preserve the neutral page's flat separation.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Shared Clock Rule",
+        "body": "Sample paused choreography from the common playhead. Pause, seek, a fresh shot and page hiding stop owned sound; no autonomous tween may outlive the inspection state. Preserve anticipation, travel-facing turns, squash, rebound and follow-through. Reduced motion initially presents the fixed finished pose with an explicit full-motion preview control, and CSS transitions are disabled under that preference.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "**Do** preserve the original CRT silhouette, alpha, registration and dark ink while grading its accent colors.",
+      "**Do** use the shared palette for bounded geometric effects and baked colors for raster art.",
+      "**Do** keep a large inspection stage alongside the native-size camera treatment.",
+      "**Do** preserve all three transitions, the full five-second routine and the shared clock.",
+      "**Do** expose pause, scrub, specific-sequence Play, transition replay and sound state."
+    ],
+    "donts": [
+      "**Don't** add glow passes or runtime filters to achieve the neon treatment.",
+      "**Don't** replace authored entrance/exit poses with a slide of the idle character.",
+      "**Don't** enlarge the native sprite budget to match the high-resolution review stage.",
+      "**Don't** treat decorative camera readouts or existing microtype as a minimum legibility standard for new interactive controls.",
+      "**Don't** treat browser previews as proof of physical-camera integration."
+    ]
+  }
+}
