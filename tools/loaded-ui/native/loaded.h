@@ -40,12 +40,14 @@ typedef struct {
   uint32_t year;          /* 0..99 */
   const uint32_t *thumbs; /* 36 contiguous 64x42 RGBA thumbnails, or NULL for plain tiles */
   int32_t circled;        /* frame index (0..35) to ring with grease pencil, -1 = derived from the roll */
+  uint32_t hold;          /* 1: a chained moment, the tab and counter are already showing (no slide in) */
 } loaded_params;
 
 typedef struct {
   uint32_t magic;
   loaded_params p;            /* configuration */
   uint32_t moment, active, start, peek_start, peek_valid;
+  uint32_t linger, linger_frame;   /* a moment ended and the peek window is still running; the counter shows the new number */
   uint32_t dirty;             /* views whose buffer may hold non-transparent pixels */
   uint32_t sig_valid, sig[LOADED_VIEWS];
   uint32_t changed;           /* views drawn or cleared by the last render/tick */
@@ -66,7 +68,8 @@ int loaded_start(loaded *L, const loaded_params *p, uint32_t now);  /* p->moment
 void loaded_peek(loaded *L, uint32_t now);                           /* start the peek clock (power-on, film change, shot) */
 void loaded_cancel(loaded *L);                                       /* the next tick clears the moment views */
 /* Renders for the CURRENT clock (stale frames are skipped, the deadline never extends). Returns a negative
- * error or: bits 0..4 = views whose pixels changed this tick, bit 8 = a moment is still running. */
+ * error or: bits 0..4 = views whose pixels changed this tick, bit 8 = a moment is still running, bit 9 = the
+ * moment is over but the tab and counter are still showing or sliding out (the peek window). */
 int loaded_tick(loaded *L, const loaded_buffers *b, uint32_t now);
 
 extern const uint32_t loaded_state_bytes;   /* sizeof(loaded) */

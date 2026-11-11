@@ -508,10 +508,10 @@ static void counter_prepare(prep_t *q, uint32_t frame) {
   }
   if (c->p >= ONE) { c->a = c->b; c->p = 0; }
 }
-static int32_t hide_amount(uint32_t mode, int32_t t, int active, int32_t peek) {
+static int32_t hide_amount(uint32_t mode, int32_t t, int active, int32_t peek, uint32_t held) {
   int32_t pe = peek;
   if (mode != LOADED_PEEK) return 0;
-  if (pe < 0 && active) pe = t;
+  if (pe < 0 && active) pe = t + (held ? 180 : 0);
   if (pe < 0) return ONE;
   if (active && pe >= 180) return 0;
   if (pe < 180) return ONE - out_cubic(prog(pe, 0, 180));
@@ -568,8 +568,8 @@ static void prepare(prep_t *q, const loaded_params *p, int32_t elapsed) {
   tab_pk = p->tab_peek_ms == -2 ? pk : p->tab_peek_ms;
   cnt_pk = p->counter_peek_ms == -2 ? pk : p->counter_peek_ms;
   cnt_mode = p->counter_mode == LOADED_INHERIT ? p->tab_mode : p->counter_mode;
-  q->hide_counter = hide_amount(cnt_mode, t, q->active, cnt_pk);
-  q->hide_tab = imax(hide_amount(p->tab_mode, t, q->active, tab_pk), tab_aside(moment, q->kind, p->tier, t, q->dur, q->active));
+  q->hide_counter = hide_amount(cnt_mode, t, q->active, cnt_pk, p->hold);
+  q->hide_tab = imax(hide_amount(p->tab_mode, t, q->active, tab_pk, p->hold), tab_aside(moment, q->kind, p->tier, t, q->dur, q->active));
 }
 
 /* ---------------------------------------------------------------- band and full-view drawing */
@@ -721,7 +721,7 @@ static int params_ok(const loaded_params *p, int need_moment) {
   if (p->tier != 1 && p->tier != 2) return 0;
   if (p->tab_mode > LOADED_PEEK || p->counter_mode > LOADED_INHERIT) return 0;
   if (p->month > 12 || p->year > 99) return 0;
-  if (p->circled < -1 || p->circled > 35) return 0;
+  if (p->circled < -1 || p->circled > 35 || p->hold > 1) return 0;
   return 1;
 }
 static int bufs_ok(const loaded_buffers *b, uint32_t tier) {
@@ -786,7 +786,7 @@ void loaded_init(loaded *L) {
   for (i = 0; i < sizeof(*L) / 4u; i++) w[i] = 0;
   L->magic = 0x4c4f4144u; L->dirty = (1u << LOADED_VIEWS) - 1u; L->canary = 0xc0ffee01u;
   L->p.tier = 1; L->p.film = 0; L->p.frame = 1; L->p.peek_ms = -1; L->p.tab_peek_ms = -2; L->p.counter_peek_ms = -2;
-  L->p.counter_mode = LOADED_INHERIT; L->p.month = LD_DEFAULT_MONTH; L->p.year = LD_DEFAULT_YEAR; L->p.circled = -1;
+  L->p.counter_mode = LOADED_INHERIT; L->p.month = LD_DEFAULT_MONTH; L->p.year = LD_DEFAULT_YEAR; L->p.circled = -1; L->p.hold = 0;
 }
 
 int loaded_render(loaded *L, const loaded_buffers *b, const loaded_params *p, int32_t elapsed) {
@@ -799,16 +799,16 @@ int loaded_render(loaded *L, const loaded_buffers *b, const loaded_params *p, in
 
 int loaded_set(loaded *L, const loaded_params *p) {
   if (!L || !params_ok(p, 0)) return -1;
-  L->p = *p; L->p.moment = LOADED_LIVE; L->sig_valid = 0;
+  L->p = *p; L->p.moment = LOADED_LIVE; L->sig_valid = 0; L->linger = 0;
   return 0;
 }
 int loaded_start(loaded *L, const loaded_params *p, uint32_t now) {
   if (!L || !params_ok(p, 1) || p->moment < LOADED_SHOT || p->moment > LOADED_ROLL) return -1;
-  L->p = *p; L->moment = p->moment; L->p.moment = p->moment; L->start = now; L->active = 1;
+  L->p = *p; L->moment = p->moment; L->p.moment = p->moment; L->start = now; L->active = 1; L->linger = 0;
   return 0;
 }
 void loaded_peek(loaded *L, uint32_t now) { if (L) { L->peek_start = now; L->peek_valid = 1; } }
-void loaded_cancel(loaded *L) { if (L) { L->active = 0; L->moment = LOADED_NONE; } }
+void loaded_cancel(loaded *L) { if (L) { L->active = 0; L->moment = LOADED_NONE; L->linger = 0; L->peek_valid = 0; } }
 
 static uint32_t sig_of(uint32_t a, uint32_t b2, uint32_t c, uint32_t d) { return hash32(hash32(a, b2), hash32(c, d)); }
 
@@ -818,8 +818,20 @@ int loaded_tick(loaded *L, const loaded_buffers *b, uint32_t now) {
   lp = L->p;
   if (L->active) {
     elapsed = now - L->start;                       /* unsigned: survives a wrapping 32-bit clock */
-    if (elapsed >= loaded_duration(lp.film, L->moment)) { L->active = 0; L->moment = LOADED_NONE; }
+    if (elapsed >= loaded_duration(lp.film, L->moment)) {
+      /* the moment is over: the tab and counter keep their peek window; the counter shows the new number */
+      L->linger_frame = L->moment == LOADED_ROLL ? 1u : (L->p.frame < LD_ROLL_LENGTH ? L->p.frame + 1u : L->p.frame);
+      L->linger = 1; L->active = 0;
+      { /* the linger is the last 500 ms of a 2000 ms peek window. A roll runs 3400 ms, so it gets its own 500 ms; a shot
+         * that is found over only after its whole window (a stalled UI) gets none: nothing outlives 2.0 s. */
+        uint32_t pe_end = L->peek_valid ? now - L->peek_start : 0xffffffffu;
+        if (L->moment == LOADED_ROLL) { if (!(pe_end >= 1500u && pe_end < (uint32_t)LD_PEEK_MS)) { L->peek_start = now - 1500u; L->peek_valid = 1; } }
+        else if (pe_end < 1500u) { L->peek_start = now - 1500u; L->peek_valid = 1; }
+      }
+      L->moment = LOADED_NONE;
+    }
   }
+  if (!L->active && L->linger) lp.frame = L->linger_frame;
   lp.moment = L->active ? L->moment : LOADED_NONE;
   if (L->peek_valid) { uint32_t d = now - L->peek_start; if (d < 5000u) pe = (int32_t)d; }
   lp.peek_ms = pe; lp.tab_peek_ms = -2; lp.counter_peek_ms = -2;
@@ -834,5 +846,6 @@ int loaded_tick(loaded *L, const loaded_buffers *b, uint32_t now) {
     L->sig_valid |= (1u << LOADED_V_TAB) | (1u << LOADED_V_COUNTER);
   }
   render_core(L, b, &lp, &q, mask);
-  return (int)(L->changed & 0x1fu) | (L->active ? 0x100 : 0);
+  if (!L->active && L->linger && q.hide_tab >= ONE && q.hide_counter >= ONE) L->linger = 0;   /* nothing left showing */
+  return (int)(L->changed & 0x1fu) | (L->active ? 0x100 : 0) | (L->linger ? 0x200 : 0);
 }

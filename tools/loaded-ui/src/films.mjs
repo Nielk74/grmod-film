@@ -23,6 +23,9 @@ export const FILMS = LOOKS.map((l, i) => {
   return { index: i, name: l.name, group: l.group, caption: (TEXT[l.name] || l).caption, code: (TEXT[l.name] || l).code, kind, edge,
     panel: l.panel, band: l.band, ink: l.ink, captionInk: l.captionInk, label: l.name.toUpperCase() };
 });
+/** Fujifilm Pro 400H (the film pack's first film in the 2026-11-02 base): a colour negative in its own greens, no logo. */
+FILMS.push({ index: FILMS.length, name: 'Pro 400H', group: 'fujifilm', caption: 'PRO', code: '400H', kind: 'neg', edge: [196, 232, 172],
+  panel: [46, 126, 108], band: [232, 228, 206], ink: [255, 255, 255], captionInk: [24, 76, 64], label: 'PRO 400H' });
 /** The camera's own looks (Standard, Vivid, ...) and any film this table does not know: a neutral negative strip. */
 FILMS.push({ index: FILMS.length, name: 'GR III', group: 'camera', caption: 'GR III', code: 'STD', kind: 'neg', edge: [236, 236, 230],
   panel: [58, 60, 66], band: [150, 152, 158], ink: [255, 255, 255], captionInk: [24, 24, 28], label: 'GR III' });

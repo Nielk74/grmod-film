@@ -93,8 +93,11 @@ def js_hashes(cases):
     return json.loads(out.stdout)
 
 
-def jscase(moment, film, frame, roll, t):
-    return dict(moment=moment, film=film, frame=frame, roll=roll, t=t, tabMode=1, counterMode=1, month=12, year=0)
+def jscase(moment, film, frame, roll, t, peek=None, hold=0):
+    # stage 1: the adapter starts the peek clock at the shot, so during a moment the clock equals the elapsed time
+    if peek is None:
+        peek = -1 if moment == 'live' else t
+    return dict(moment=moment, film=film, frame=frame, roll=roll, t=t, tabMode=1, counterMode=1, month=12, year=0, peek=peek, hold=hold)
 
 
 def verify(data, segments, symbols):
@@ -116,7 +119,10 @@ def verify(data, segments, symbols):
 
     # ---- 1. the selected film: the adapter's read against the camera's own getter and the film pack's own layout
     sel = p.symbols['loaded_selected_film']
-    expected_of_look = lambda look: (look - 64 if 65 <= look < 84 else 20)            # slot 0 (Pro 400H) and non-films: neutral
+    slots = json.loads((BUILD/'payload-manifest.json').read_text(encoding='utf-8'))['slots']
+    NEUTRAL = 21
+    slot_film = {x['look']: x['film'] for x in slots}                                  # generated from the names read out of the image
+    expected_of_look = lambda look: slot_film.get(look, NEUTRAL)
     cases = 0
     for active in (0, 1, 2):
         for look in list(range(11, 23)) + list(range(64, 84)) + [0, 10, 23, 63, 84, 255]:
@@ -148,6 +154,20 @@ def verify(data, segments, symbols):
     checks.append(f'selected film: {cases} cases, adapter read equals the film pack\'s layout and the camera\'s own getter 0x5326c1cc; '
                   'movie flag, bad set, null and misaligned record pointers give no film')
 
+    # the slot table: re-read from the base RTOS, equal to the manifest; a base with an unknown film is refused
+    sys.path.insert(0, str(HERE))
+    import link_loaded as linker
+    reread = linker.read_slot_names((BUILD/'pack-rtos.bin').read_bytes())
+    ok([(x['slot'], x['look'], x['name']) for x in reread] == [(x['slot'], x['look'], x['name']) for x in slots], 'slot names re-read from the image')
+    ok(len(slots) == 20 and all(x['film'] == dict(linker.loaded_films()[i][::-1] for i in range(len(linker.loaded_films())))[x['name']] for x in slots), 'every slot has its Loaded film by name')
+    refused = False
+    try:
+        linker.match_slots([dict(slot=0, look=64, name='Not A Loaded Film')], linker.loaded_films())
+    except ValueError as error:
+        refused = 'Not A Loaded Film' in str(error)
+    ok(refused, 'a slot without a Loaded film must refuse the base')
+    checks.append('the slot table: the 20 names re-read from the delivered base equal the manifest, each matches a Loaded film by name, and a slot without one is refused')
+
     # ---- 2. one completed shot: four owned views, one timer, frame 1 roll 1, pixels equal to the JS reference
     p = new()
     baseline = len(p.allocations)
@@ -173,9 +193,15 @@ def verify(data, segments, symbols):
             p.fire(t - done)
             done = t
         ok(p.hashes() == want[1:], f'frame at +{t} ms differs from the JS reference')
-    p.fire(1500 - done)                                   # the deadline
-    ok(not p.children(root) and not p.timers(), 'Everything must be gone at the deadline')
-    checks.append(f'{len(times)} frames across the 1500 ms shot equal the JS reference; the views and the timer are gone at the deadline')
+    # the strips leave at the deadline; the counter and tab linger and slide out; everything is gone after 2.0 s
+    for pe in (1500, 1533, 1764, 1989):
+        p.fire(pe - done); done = pe
+        ok(len(p.children(root)) == 4 and len(p.timers()) == 1, f'views and timer stay through the linger (+{pe})')
+        ok(p.hashes() == js_hashes([jscase('live', 11, 2, 1, 0, peek=pe)])[0][1:], f'linger frame at +{pe} differs from the JS reference')
+        ok(p.hashes()[0] == zlib.crc32(bytes(720 * 44 * 4)) and p.hashes()[1] == zlib.crc32(bytes(720 * 44 * 4)), 'the strips are gone')
+    p.fire(2010 - done)
+    ok(not p.children(root) and not p.timers(), 'Everything must be gone after the peek window (about 2.0 s)')
+    checks.append(f'{len(times)} frames across the 1500 ms shot equal the JS reference (peek clock at the shot); 4 linger frames after the deadline equal the JS reference; the views and the timer are gone at 2.0 s')
 
     # ---- 3. real Canvas drawing through the original native copier; canaries; the draw checks per view
     p.set_shots(0)
@@ -268,13 +294,38 @@ def verify(data, segments, symbols):
     p.fire(599)
     ok(len(p.children(root)) == 4, 'still running at 1499 ms')
     p.fire(1)
-    ok(not p.children(root) and not p.timers(), 'deadline holds across the transitions')
-    checks.append('menu and playback destinations cancel; live view and photo review keep four views and the full deadline')
+    ok(len(p.children(root)) == 4 and len(p.timers()) == 1, 'the moment ends at its deadline; the counter and tab linger')
+    # a transition during the linger detaches and reattaches the same views and keeps the peek window
+    p.now = 5500 + 100
+    p.call('grmod_before_transition', LV, 0x0800000c)
+    ok(not p.children(root) and not p.timers(), 'detach during the linger')
+    p.active = QV
+    p.call('grmod_after_transition')
+    ok(p.children(p.roots[1]) == p.adapter_views(), 'reattach during the linger')
+    p.fire(100)
+    ok(p.hashes() == js_hashes([jscase('live', 11, 3, 1, 0, peek=1700)])[0][1:], 'linger frame after a transition (+1700)')
+    p.now = 5500 + 150
+    p.call('grmod_before_transition', QV, 0x08000000)
+    p.active = LV
+    p.call('grmod_after_transition')
+    # a new shot during the linger: no second set of views, one timer, the furniture is held (no new slide in)
+    p.call('grmod_on_shot')
+    ok(len(p.children(root)) == 4 and len(p.timers()) == 1, 'a shot during the linger reuses the views and the timer')
+    nshots = p.shots()
+    p.fire(330)
+    ok(p.hashes() == js_hashes([jscase('shot', 11, (nshots - 1) % 36 + 1, 1, 330, peek=330 + 180)])[0][1:], 'a shot during the linger continues without a new slide-in')
+    p.fire(1500 - 330 + 100)
+    p.call('grmod_cancel')                                   # cancel during the linger
+    ok(not p.children(root) and not p.timers(), 'cancel during the linger clears at once')
+    p.call('grmod_on_shot')
+    p.fire(2010)
+    ok(not p.children(root) and not p.timers(), 'deadline and peek window end the sequence')
+    checks.append('menu and playback destinations cancel; live view and photo review keep four views through the moment and the linger; a transition, a second shot and a cancel during the linger behave as during the moment')
     for _ in range(5):                                       # repeated shots (also while one runs) never add views or timers
         p.call('grmod_on_shot')
     ok(len(p.children(root)) == 4 and len(p.timers()) == 1, 'second shot mid-moment replaces the first')
     p.fire(560)
-    ok(p.hashes() == js_hashes([jscase('shot', 11, 7, 1, 560)])[0][1:], 'the sixth shot shows frame 7 from its own start')
+    ok(p.hashes() == js_hashes([jscase('shot', 11, (p.shots() - 1) % 36 + 1, 1 + (p.shots() - 1) // 36, 560, peek=560 + 180)])[0][1:], 'the last shot shows its own frame from its own start')
     p.call('grmod_cancel')
     ok(not p.children(root) and not p.timers(), 'cancel clears at once')
     p.call('grmod_on_shot')
@@ -305,10 +356,10 @@ def verify(data, segments, symbols):
     q.record(0, 0, (11, 11, 11))                              # the camera's own Standard look
     q.call('grmod_on_shot')
     ok(len(q.children(q.roots[0])) == 4, 'a non-film look must still play the neutral strip')
-    ok(q.hashes() == js_hashes([jscase('shot', 20, 1, 1, 0)])[0][1:], 'neutral GR III strip must equal the JS reference')
-    q.record(0, 0, (64 + 0, 11, 11))                          # slot 0 of this base (Pro 400H) is not in the Loaded table: neutral
+    ok(q.hashes() == js_hashes([jscase('shot', NEUTRAL, 1, 1, 0)])[0][1:], 'neutral GR III strip must equal the JS reference')
+    q.record(0, 0, (64 + 0, 11, 11))                          # slot 0 of this base is Pro 400H: a film of its own
     q.call('grmod_on_shot')
-    ok(q.hashes() == js_hashes([jscase('shot', 20, 2, 1, 0)])[0][1:], 'slot 0 neutral')
+    ok(q.hashes() == js_hashes([jscase('shot', 20, 2, 1, 0, peek=180)])[0][1:], 'slot 0 is Pro 400H, not the neutral strip')
     q.call('grmod_cancel')
     q.record(1, 0, (64 + 11, 11, 11))                         # movie mode: no animation
     q.call('grmod_on_shot')
@@ -331,10 +382,12 @@ def verify(data, segments, symbols):
     q.fire(1499)
     ok(len(q.children(q.roots[0])) == 4, 'running at 1499 ms across the clock wrap')
     q.fire(1)
-    ok(not q.children(q.roots[0]) and not q.timers(), 'deadline holds across the 32-bit wrap')
+    ok(len(q.children(q.roots[0])) == 4, 'lingering after the deadline across the wrap')
+    q.fire(501)
+    ok(not q.children(q.roots[0]) and not q.timers(), 'the 2.0 s sequence ends across the 32-bit wrap')
     q.canaries()
-    checks.append('a non-film look and slot 0 play the neutral strip; movie mode, no settings record, bad clock and an unexpected controller give no animation; '
-                  'the 1500 ms deadline holds across the 32-bit clock wrap')
+    checks.append('a non-film look plays the neutral strip and slot 0 plays Pro 400H; movie mode, no settings record, bad clock and an unexpected controller give no animation; '
+                  'the 2.0 s sequence holds across the 32-bit clock wrap')
 
     # ---- 7. frame 36 leads into the end of the roll, every film and format through the payload
     q = new()
@@ -346,24 +399,29 @@ def verify(data, segments, symbols):
     ok(q.hashes() == js_hashes([jscase('shot', 11, 36, 1, 700)])[0][1:], 'frame 36 shot')
     q.fire(800)                                                # 1500: the shot is over, the roll moment starts
     ok(len(q.children(q.roots[0])) == 4 and q.pending_roll() == 0, 'the end of the roll follows once')
-    ok(q.hashes() == js_hashes([jscase('roll', 11, 36, 1, 0)])[0][1:], 'roll moment first frame')
+    ok(q.hashes() == js_hashes([jscase('roll', 11, 36, 1, 0, peek=-1, hold=1)])[0][1:], 'roll moment first frame: the counter and tab are already showing (no pop)')
     done = 0
     roll_times = [297, 990, 1485, 2013, 2706, 2871, 3366]
-    for t, want in zip(roll_times, js_hashes([jscase('roll', 11, 36, 1, t) for t in roll_times])):
+    for t, want in zip(roll_times, js_hashes([jscase('roll', 11, 36, 1, t, peek=-1, hold=1) for t in roll_times])):
         q.fire(t - done); done = t
         ok(q.hashes() == want[1:], f'roll frame at +{t} differs from the JS reference')
-    q.fire(3400 - done)
-    ok(not q.children(q.roots[0]) and not q.timers(), 'the end of the roll clears at 3400 ms')
+    q.fire(3400 - done); done = 3400                           # the roll's deadline: the strips go, the counter shows 1 and lingers
+    ok(len(q.children(q.roots[0])) == 4, 'the roll lingers')
+    ok(q.hashes() == js_hashes([jscase('live', 11, 1, 1, 0, peek=1500)])[0][1:], 'the counter shows 1 after the roll')
+    q.fire(33); done += 33
+    ok(q.hashes() == js_hashes([jscase('live', 11, 1, 1, 0, peek=1533)])[0][1:], 'roll linger frame (+33)')
+    q.fire(520)
+    ok(not q.children(q.roots[0]) and not q.timers(), 'the end of the roll is gone 0.5 s after the film')
     q.call('grmod_on_shot')                                    # the next shot is frame 1 of roll 2
     q.fire(330)
     ok(q.hashes() == js_hashes([jscase('shot', 11, 1, 2, 330)])[0][1:], 'frame 1 of the next roll')
-    checks.append('frame 36 plays its shot, then the end of the roll (3400 ms, 7 frames equal the JS reference), then clears; the next shot is frame 1 of roll 2')
+    checks.append('frame 36 plays its shot, then the end of the roll (3400 ms, 7 frames equal the JS reference), lingers 0.5 s with the counter at 1 (no pop between the two moments), then clears; the next shot is frame 1 of roll 2')
     # every film kind through the payload, three times each
-    spec = [(film, t) for film in (1, 8, 10, 12, 13, 17, 18, 20) for t in (231, 561, 1089)]
+    spec = [(film, t) for film in (1, 8, 10, 12, 13, 17, 18, 20, 21) for t in (231, 561, 1089)]
     want_all = js_hashes([jscase('shot', film, 1, 1, t) for film, t in spec])
     for (film, t), want in zip(spec, want_all):
         q = new()
-        q.record(0, 0, (64 + film if film < 20 else 11, 11, 11))
+        q.record(0, 0, ({v: k for k, v in slot_film.items()}[film] if film < 21 else 11, 11, 11))
         q.call('grmod_on_shot')
         q.fire(t)
         ok(q.hashes() == want[1:], f'film {film} at +{t} differs from the JS reference')

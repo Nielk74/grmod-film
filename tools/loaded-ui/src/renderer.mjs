@@ -365,10 +365,10 @@ export function createRenderer({ guard = 0 } = {}) {
     if (cs.p >= ONE) { cs.a = cs.b; cs.p = 0; }
   }
   /** 0 = shown, 1024 = slid out of its view. Peek mode: in for 180 ms, out over the last 240 of 2000 ms. */
-  function hideAmount(mode, t, active, peek) {
+  function hideAmount(mode, t, active, peek, held) {
     if (mode !== 'peek') return 0;
     let pe = peek;
-    if (pe < 0 && active) pe = t;
+    if (pe < 0 && active) pe = t + (held ? 180 : 0);   // held: chained moment, the furniture is already showing
     if (pe < 0) return ONE;
     if (active && pe >= 180) return 0;
     if (pe < 180) return ONE - outCubic(prog(pe, 0, 180));
@@ -435,8 +435,9 @@ export function createRenderer({ guard = 0 } = {}) {
     const tabPk = options.tabPeekElapsed === undefined ? pk : options.tabPeekElapsed;
     const cntPk = options.counterPeekElapsed === undefined ? pk : options.counterPeekElapsed;
     const cntMode = options.counterMode === undefined ? options.tabMode : options.counterMode;
-    const hideCounter = hideAmount(cntMode, t, active, cntPk);
-    const hideTab = Math.max(hideAmount(options.tabMode, t, active, tabPk), tabAside(moment, film, tier, t, dur, active));
+    const held = options.furnitureHeld ? 1 : 0;
+    const hideCounter = hideAmount(cntMode, t, active, cntPk, held);
+    const hideTab = Math.max(hideAmount(options.tabMode, t, active, tabPk, held), tabAside(moment, film, tier, t, dur, active));
 
     for (const v of views) {
       if (v.tier > tier) { finish(v, false); continue; }

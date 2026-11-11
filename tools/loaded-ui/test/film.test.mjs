@@ -196,3 +196,32 @@ test('load: the tab is out during the cassette and slides in as the cassette lea
     assert.equal(r.render('load', f, 1, 12, 2190, { tier, tabMode: 'always' }).find(x => x.id === 'tab').active, true);
   }
 });
+
+test('stage 1 configuration: the counter and tab slide in with the shot, linger after the strips, slide out, all within 2 s', () => {
+  const r = createRenderer(), f = idxOf('Portra 400'), d = duration('shot', FILMS[f]);
+  const o = pe => ({ tier: 1, tabMode: 'peek', counterMode: 'peek', peekElapsed: pe });
+  const frame = (moment, t, pe, fr = 17) => { const v = r.render(moment, f, fr, 12, t, o(pe)); return { counter: v.find(x => x.id === 'counter'), tab: v.find(x => x.id === 'tab'), top: v.find(x => x.id === 'top') }; };
+  // first frame: not present at all; a few frames later partly slid in; fully in place by 300 ms
+  let v = frame('shot', 0, 0);
+  assert.equal(v.counter.active, false); assert.equal(v.tab.active, false);
+  const partial = frame('shot', 66, 66).counter.rgba.slice(), full = frame('shot', 400, 400).counter.rgba.slice();
+  assert.ok(frame('shot', 66, 66).counter.active && partial.some((x, i) => x !== full[i]), 'counter slides in');
+  // 1450 ms: strips still on, furniture fully shown
+  assert.equal(frame('shot', 1450, 1450).top.active, true);
+  // after the deadline the strips are gone and the furniture lingers, still shown, then slides out
+  v = frame('live', 0, 1600, 18);
+  assert.equal(v.top.active, false); assert.equal(v.counter.active, true); assert.equal(v.tab.active, true);
+  const shown = frame('live', 0, 1700, 18).counter.rgba.slice(), out = frame('live', 0, 1900, 18).counter.rgba.slice();
+  assert.ok(shown.some((x, i) => x !== out[i]), 'sliding out');
+  v = frame('live', 0, 2000, 18);
+  assert.equal(v.counter.active, false); assert.equal(v.tab.active, false);
+  assert.ok(2000 - d >= 0 && 2000 <= 2000, 'the whole sequence is 2.0 s');
+});
+
+test('a chained moment holds the furniture (no slide in) and the peek window can end 500 ms after it', () => {
+  const r = createRenderer(), f = idxOf('Portra 400');
+  const v = r.render('roll', f, 36, 12, 0, { tier: 1, tabMode: 'peek', counterMode: 'peek', peekElapsed: -1, furnitureHeld: true });
+  assert.equal(v.find(x => x.id === 'counter').active, true, 'counter is already showing at the first frame of the roll');
+  const cold = r.render('roll', f, 36, 12, 0, { tier: 1, tabMode: 'peek', counterMode: 'peek', peekElapsed: -1 });
+  assert.equal(cold.find(x => x.id === 'counter').active, false, 'without hold it slides in from hidden');
+});

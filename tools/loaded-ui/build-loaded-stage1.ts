@@ -79,7 +79,7 @@ const sectionReport=sections.map((section,i)=>{
 });
 const report={schema:1,camera:'GR III',baseVersion:'2.10',filename:'fwdc239b.bin',silent:true,stage:1,
   packSha256:hash(pack),outputSha256:hash(built.out),outputBytes:built.out.length,decodedBytes:next.length,
-  rtosGrowth:growth,payloadBytes:payload.length,rtosRuntimeEnd:base+growth,hardwareTested:false,versionRaised:false,
+  rtosGrowth:growth,payloadBytes:payload.length,rtosRuntimeEnd:base+growth,slots:manifest.slots,hardwareTested:false,versionRaised:false,
   checks,patches,sections:sectionReport};
 mkdirSync(dirname(resolve(output)),{recursive:true});mkdirSync(build,{recursive:true});
 writeFileSync(resolve(output),built.out);

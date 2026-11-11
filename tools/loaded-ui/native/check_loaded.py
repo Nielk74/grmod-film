@@ -136,8 +136,8 @@ class Emu:
 
     def write_params(self, c, thumbs_addr=None):
         t = thumbs_addr if thumbs_addr is not None else (self.thumbs_addr if c.get('thumbs') else 0)
-        blob = struct.pack('<7I3i3Ii', c.get('momentId', MOMENTS[c['moment']] if 'moment' in c else 0), c['film'], c['frame'], c['roll'], c['tier'],
-                           c['tabMode'], c['counterMode'], c['peek'], c['tabPeek'], c['counterPeek'], c['month'], c['year'], t, c['circled'])
+        blob = struct.pack('<7I3i3IiI', c.get('momentId', MOMENTS[c['moment']] if 'moment' in c else 0), c['film'], c['frame'], c['roll'], c['tier'],
+                           c['tabMode'], c['counterMode'], c['peek'], c['tabPeek'], c['counterPeek'], c['month'], c['year'], t, c['circled'], c.get('hold', 0))
         self.cpu.mem_write(self.BLOCK + 0x100, blob)
         return self.BLOCK + 0x100
 

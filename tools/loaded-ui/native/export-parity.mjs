@@ -26,7 +26,7 @@ export function makeThumbs() {
 const thumbsAll = makeThumbs();
 const thumbViews = Array.from({ length: 36 }, (_, i) => thumbsAll.subarray(i * SHEET.fw * SHEET.fh, (i + 1) * SHEET.fw * SHEET.fh));
 
-const base = { tier: 1, tabMode: 0, counterMode: 2, peek: -1, tabPeek: -2, counterPeek: -2, month: 10, year: 26, thumbs: 0, circled: -1, roll: 12 };
+const base = { tier: 1, tabMode: 0, counterMode: 2, peek: -1, tabPeek: -2, counterPeek: -2, month: 10, year: 26, thumbs: 0, circled: -1, roll: 12, hold: 0 };
 const cases = [];
 const add = c => cases.push({ ...base, ...c });
 const steps = (a, b, d) => { const o = []; for (let t = a; t <= b; t += d) o.push(t); return o; };
@@ -61,12 +61,19 @@ for (const roll of [0, 1, 12, 999999]) for (const circled of [-1, 0, 17, 35]) fo
 for (const [tm, cm] of [[0, 0], [1, 1]]) for (const m of ['shot', 'load', 'roll']) for (const f of [idx('Instant'), idx('Velvia'), idx('Portra 400')]) for (const tier of [1, 2])
   for (const t of [0, 90, 200, 1000, 1700, 1950, 2100, 2190]) add({ moment: m, film: f, frame: FRAME[m], tier, t, tabMode: tm, counterMode: cm, peek: t < 1500 ? t : -1 });
 
+// 7. the stage 1 configuration: peek tab and counter, the peek clock at the shot; the linger after the moment; a chained roll (hold)
+for (const f of [idx('Portra 400'), idx('Velvia'), idx('Instant'), idx('GR III')]) {
+  for (const t of steps(0, duration('shot', FILMS[f]) - 1, 33)) add({ moment: 'shot', film: f, frame: 17, tier: 1, t, tabMode: 1, counterMode: 1, peek: t });
+  for (const pe of steps(1500, 2040, 33)) add({ moment: 'live', film: f, frame: 18, tier: 1, t: 0, tabMode: 1, counterMode: 1, peek: pe });
+}
+for (const t of [...steps(0, 600, 33), 1000, 2000, 3399]) add({ moment: 'roll', film: idx('Portra 400'), frame: 36, tier: 1, t, tabMode: 1, counterMode: 1, peek: -1, hold: 1 });
+for (const pe of steps(1500, 2040, 33)) add({ moment: 'live', film: idx('Portra 400'), frame: 1, tier: 1, t: 0, tabMode: 1, counterMode: 1, peek: pe });
 const r = createRenderer();
 const HASHES = (c, dump) => {
   const views = r.render(c.moment, c.film, c.frame, c.roll, c.t, { tier: c.tier,
     tabMode: c.tabMode === 1 ? 'peek' : 'always', counterMode: c.counterMode === 2 ? undefined : (c.counterMode === 1 ? 'peek' : 'always'),
     peekElapsed: c.peek, tabPeekElapsed: c.tabPeek === -2 ? undefined : c.tabPeek, counterPeekElapsed: c.counterPeek === -2 ? undefined : c.counterPeek,
-    date: c.month === 12 ? null : { month: c.month, year: c.year }, thumbs: c.thumbs ? thumbViews : null, circled: c.circled < 0 ? undefined : c.circled });
+    date: c.month === 12 ? null : { month: c.month, year: c.year }, thumbs: c.thumbs ? thumbViews : null, circled: c.circled < 0 ? undefined : c.circled, furnitureHeld: c.hold === 1 });
   if (dump) return views;
   return views.map(v => zlib.crc32(Buffer.from(v.rgba.buffer, v.rgba.byteOffset, v.rgba.byteLength)));
 };

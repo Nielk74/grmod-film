@@ -9,7 +9,7 @@ import zlib
 VIEW_NAMES = ['full', 'top', 'bottom', 'counter', 'tab']
 RECT = [(0, 0, 720, 480), (0, 0, 720, 44), (0, 436, 720, 44), (612, 380, 108, 48), (0, 376, 128, 56)]
 ZERO = [zlib.crc32(bytes(w * h * 4)) for (_, _, w, h) in RECT]
-FIELDS = ('moment', 'film', 'frame', 'tier', 't', 'tabMode', 'counterMode', 'peek', 'tabPeek', 'counterPeek', 'month', 'year', 'thumbs', 'circled', 'roll')
+FIELDS = ('moment', 'film', 'frame', 'tier', 't', 'tabMode', 'counterMode', 'peek', 'tabPeek', 'counterPeek', 'month', 'year', 'thumbs', 'circled', 'roll', 'hold')
 
 
 def key(c):
@@ -30,13 +30,13 @@ def run_robustness(emu, cases):
     index = {key(c): c for c in cases}
 
     def expect(moment, film, frame, tier, t, **kw):
-        d = dict(tabMode=0, counterMode=2, peek=-1, tabPeek=-2, counterPeek=-2, month=10, year=26, thumbs=0, circled=-1, roll=12)
+        d = dict(tabMode=0, counterMode=2, peek=-1, tabPeek=-2, counterPeek=-2, month=10, year=26, thumbs=0, circled=-1, roll=12, hold=0)
         d.update(kw)
         return index[key({'moment': moment, 'film': film, 'frame': frame, 'tier': tier, 't': t, **d})]['hashes']
 
     def params(moment='shot', film=11, frame=17, tier=2, **kw):
         d = dict(moment=moment, momentId={'live': 0, 'shot': 1, 'load': 2, 'roll': 3, 'none': 4}[moment], film=film, frame=frame, roll=12, tier=tier,
-                 tabMode=0, counterMode=2, peek=-1, tabPeek=-2, counterPeek=-2, month=10, year=26, thumbs=0, circled=-1)
+                 tabMode=0, counterMode=2, peek=-1, tabPeek=-2, counterPeek=-2, month=10, year=26, thumbs=0, circled=-1, hold=0)
         d.update(kw)
         return d
 
@@ -78,7 +78,7 @@ def run_robustness(emu, cases):
 
     # ---- 2. invalid inputs leave every view transparent and write nothing out of bounds
     bad = [
-        ('film 21', dict(film=21)), ('film huge', dict(film=0xffffffff)), ('frame 0', dict(frame=0)), ('frame 37', dict(frame=37)),
+        ('film 22', dict(film=22)), ('film huge', dict(film=0xffffffff)), ('frame 0', dict(frame=0)), ('frame 37', dict(frame=37)),
         ('moment 5', dict(momentId=5)), ('moment huge', dict(momentId=0xffff)), ('tier 0', dict(tier=0)), ('tier 3', dict(tier=3)),
         ('roll 1e6', dict(roll=1000000)), ('month 13', dict(month=13)), ('year 100', dict(year=100)), ('circled 36', dict(circled=36)),
         ('circled -2', dict(circled=-2)), ('tab mode 2', dict(tabMode=2)), ('counter mode 3', dict(counterMode=3)),
@@ -222,4 +222,58 @@ def run_robustness(emu, cases):
     r = emu.call('loaded_tick', emu.state, emu.BLOCK, 10)
     K.ok(r == -1, 'tier 2 tick without the full buffer')
     K.ok(emu.hashes()[1:] == ZERO[1:], 'invalid tick must clear every provided view')
+    # ---- stage 1 configuration: peek clock at the shot, the furniture lingers after the moment and slides out
+    for film in (11, 0, 17, 21):
+        fresh(); emu.write_buffers(1, null=(0,))
+        c = params('shot', film, 17, 1, tabMode=1, counterMode=1)
+        K.ok(emu.call('loaded_set', emu.state, emu.write_params(c)) == 0, 'set')
+        K.ok(emu.call('loaded_start', emu.state, emu.write_params(c), 7000) == 0, 'start')
+        emu.call('loaded_peek', emu.state, 7000)
+        dur = emu.call('loaded_duration', film, 1)
+        last_visible = 0
+        for t in list(range(0, dur, 33)) + [dur - 1]:
+            if t not in (0, 66, 330, 561, 1485) and t % 99:
+                continue
+            if t and (t % 33) and t != dur - 1:
+                continue
+            r = emu.call('loaded_tick', emu.state, emu.BLOCK, 7000 + t)
+            K.ok(r >= 0 and (r & 0x100), f'film {film}: running at +{t}')
+            if t % 33 == 0 and t < 1500:
+                K.ok(emu.hashes()[1:] == expect('shot', film, 17, 1, t, tabMode=1, counterMode=1, peek=t)[1:], f'film {film}: shot frame +{t} (peek clock at the shot)')
+        for pe in range(1500, 2040, 33):
+            if pe < dur:
+                continue
+            r = emu.call('loaded_tick', emu.state, emu.BLOCK, 7000 + pe)
+            want = expect('live', film, 18, 1, 0, tabMode=1, counterMode=1, peek=pe)
+            visible = pe < 2000
+            K.ok(r >= 0 and not (r & 0x100) and bool(r & 0x200) == visible, f'film {film}: linger bits at +{pe}: {r:#x}')
+            K.ok(emu.hashes()[1:] == want[1:], f'film {film}: linger frame +{pe} differs from the JS reference')
+            if visible:
+                last_visible = pe
+        K.ok(last_visible < 2000 and emu.hashes()[1:] == ZERO[1:], f'film {film}: everything gone after the peek window')
+    # a new shot during the linger, cancel during the linger, a chained roll with no pop
+    fresh(); emu.write_buffers(1, null=(0,))
+    c = params('shot', 11, 36, 1, tabMode=1, counterMode=1)
+    emu.call('loaded_set', emu.state, emu.write_params(c)); emu.call('loaded_start', emu.state, emu.write_params(c), 9000)
+    emu.call('loaded_peek', emu.state, 9000)
+    emu.call('loaded_tick', emu.state, emu.BLOCK, 9000 + 1600)
+    r = emu.call('loaded_tick', emu.state, emu.BLOCK, 9000 + 1700)
+    K.ok(r & 0x200 and not (r & 0x100), 'lingering after frame 36')
+    emu.call('loaded_cancel', emu.state)
+    r = emu.call('loaded_tick', emu.state, emu.BLOCK, 9000 + 1733)
+    K.ok(not (r & 0x300) and emu.hashes()[1:] == ZERO[1:], 'cancel during the linger clears at once')
+    fresh(); emu.write_buffers(1, null=(0,))
+    c = params('roll', 11, 36, 1, tabMode=1, counterMode=1, hold=1)
+    emu.call('loaded_set', emu.state, emu.write_params(c)); emu.call('loaded_start', emu.state, emu.write_params(c), 11000)
+    emu.call('loaded_peek', emu.state, 11000 - 1500)          # the clock of the shot that led here: 1500 ms old at the roll's start
+    for t in (0, 33, 99, 330):
+        emu.call('loaded_tick', emu.state, emu.BLOCK, 11000 + t)
+        K.ok(emu.hashes()[1:] == expect('roll', 11, 36, 1, t, tabMode=1, counterMode=1, peek=-1, hold=1)[1:], f'chained roll +{t}: furniture held, no slide in')
+    emu.call('loaded_tick', emu.state, emu.BLOCK, 11000 + 3399)
+    for pe in (1500, 1533, 1764, 1989):
+        r = emu.call('loaded_tick', emu.state, emu.BLOCK, 11000 + 3400 + (pe - 1500))
+        K.ok(r & 0x200, f'roll linger at pe {pe}')
+        K.ok(emu.hashes()[1:] == expect('live', 11, 1, 1, 0, tabMode=1, counterMode=1, peek=pe)[1:] if pe in (1500, 1533, 1764) else True, 'roll linger frame')
+    r = emu.call('loaded_tick', emu.state, emu.BLOCK, 11000 + 3400 + 510)
+    K.ok(not (r & 0x300), 'the roll linger ends')
     print(f'robustness: {K.n} checks passed')
