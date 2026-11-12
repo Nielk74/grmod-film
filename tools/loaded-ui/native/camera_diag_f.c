@@ -1,17 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Loaded stage 1f: DIAGNOSTIC adapter plus the candidate fix for the rectangle problem seen in stage 1e. Stage 1e's panel, counters, per-view draw
- * statistics, proof patterns and per-shot log are kept. New:
- *  - layout: a view attached to a root that is clean gets no absolute rectangle (a fresh view already carries its own "needs layout" flag, so
- *    view_visible does not flag the ancestors and the layout pass never visits it). After attaching, the root is asked to lay out its new
- *    children through its own vtable slot 0x20 (the request view_visible makes). The variant follows the hook count (1, 4, 7 ... A; 2, 5, 8 ... B; 3, 6, 9 ... C):
- *      A the Loaded steps run on timer ticks and the root is asked to lay out (the candidate fix),
- *      B the Loaded steps 1 to 7 run inside the hook with the panel, no request (the panel's own path),
- *      C stage 1e's behaviour as the control: timer ticks, no request;
- *  - a global event log with absolute clock times that survives across photos: the shutter release hook, the completion hook, transitions,
- *    attach, first copy of each view, and every UI event the camera dispatches (rate limited to one per id and 500 ms), read from a sixth
- *    hook at the UI event dispatcher 0x53228ab4;
- *  - two pages: the last 8 global events with the time between them, and the 8 events before the last hook with their distance to it.
- * Nothing is written to the settings, nothing is played, nothing waits. */
+/* Loaded stage 1f diagnostic: every attachment requests native layout, including the panel.
+ * All tree, timer, table and ring mutations run on the recovered native UI callback paths.
+ * The release-control callback has unknown task ownership: it only publishes a bounded mailbox.
+ * Observations retain full UI/raw ids and freeze their table at the completion hook. Timing is
+ * between observed callbacks, not exposure duration; copies into memory do not prove display.
+ * Nothing is written to settings, nothing is played, and no callback waits for another task. */
 #include "camera_loaded.h"
 #include "../../shot-animation/native/camera_clock.h"
 #include "loaded.h"
@@ -53,10 +46,10 @@ typedef struct { uint32_t *vtable; } Listener;
 
 #define DIAG_W 240u
 #define DIAG_H 176u
-#define DIAG_MS 15000u             /* ten pages of 1.5 s */
-#define DIAG_TICKS 455u            /* the same in 33 ms ticks, used when the clock cannot be read */
+#define DIAG_MS 25500u             /* seventeen pages of 1.5 s */
+#define DIAG_TICKS 773u            /* the same in 33 ms ticks, used when the clock cannot be read */
 #define PAGE_MS 1500u
-#define NPAGES 10u
+#define NPAGES 17u
 #define PROOF_MS 1000u
 #define PROOF_TICKS 31u
 #define USERDATA_MODEL 0x55063f30u
@@ -88,7 +81,14 @@ static const char *const REASON[NREASON]={"CLOCK","ROOT","FILM","CREATE","ATTACH
 /* Per view statistics, split by the controller type seen at the draw: 0 LiveView, 1 QuickView, 2 other. Index 4 is the panel, 5 an unknown view. */
 typedef struct { uint32_t calls[3],copied[3],rej[3],parent_ok;int32_t abs[4]; } VStat;
 typedef struct { uint8_t code,ctype,aux,pad;uint32_t ms; } LogE;
-typedef struct { uint16_t code;uint8_t ctype,aux;uint32_t t; } GLogE;
+enum { EVENT_UI=0,EVENT_RAW=1,EVENT_MARKER=2 };
+/* pad retains clock validity: GLogE bit 0; TabRow bit 0 first, bit 1 last. */
+typedef struct { uint32_t code;uint8_t ctype,aux,kind,pad;uint32_t t; } GLogE;
+/* periodic is a retained ABI name: only "seen in the preceding observation window", never causation. */
+typedef struct { uint32_t id;uint8_t win,periodic,kind,pad;uint32_t first,last,count; } TabRow;
+typedef struct { uint32_t id,kind; } BackgroundId;
+#define NTAB 24u
+extern volatile uint32_t grmod_alloc_flag;   /* a spare zero-filled RAM word (0x5580438c): 1 after the event hook failed to allocate the block */
 #define NGLOG 160u
 enum { GK_RELEASE=0x1001,GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,GK_D1,GK_D2,GK_D3,GK_D4,GK_PD,GK_CANCEL };
 static const char *const GNAME[11]={"RL","HK","TB","TA","AT","D1","D2","D3","D4","PD","XC"};
@@ -112,8 +112,16 @@ typedef struct {
     uint32_t t_hook,t_root,t_att,t_first,first_pending,first_draw_ms,panel_calls_shot,first_call_mask,first_copy_mask,ld_copies_shot,last_tick;
     LogE log[NLOG];uint32_t nlog;
     GLogE glog[NGLOG];uint32_t ng,ev_total,ev_logged;
-    uint16_t ev_id[16];uint32_t ev_t[16];
+    uint32_t ev_id[16],ev_t[16];uint8_t ev_kind[16],ev_seen[16],ev_clock_valid[16];
+    TabRow tab[NTAB];uint32_t ntab,tab_ovf,rl_count,rl_seen,rl_time,t_rl,hk_rl_count,nrlhk,rlhk[3];
     GLogE pre[8];uint32_t npre,t_pre;
+    uint32_t first_call_ms;
+    uint32_t release_gate,pending_releases,pending_time,pending_valid,release_dropped;
+    uint32_t rl_valid,tab_base_valid,hook_clock_valid;
+    BackgroundId background[NTAB];uint32_t nbackground,background_ovf;
+    TabRow frozen_tab[NTAB];uint32_t frozen_ntab,frozen_ovf,frozen_base,frozen_base_valid,frozen_valid,frozen_background_ovf;
+    uint32_t rlhk_delta[3],rlhk_valid[3];
+    uint32_t first_call_valid,first_draw_valid,t_root_valid,t_att_valid,t_first_valid;
     uint32_t pixels[DIAG_W*DIAG_H];            /* the proven size: Terminal's pixel array was 168,960 bytes */
 } Diag;
 #define MAGIC 0x44474c47u
@@ -131,15 +139,27 @@ const uint32_t grmod_layout[]={__builtin_offsetof(Diag,ld),__builtin_offsetof(Di
     /* 40 */ sizeof(LogE),__builtin_offsetof(Diag,ld_copies_shot),__builtin_offsetof(Diag,last_cancel_hook),__builtin_offsetof(Diag,reattach),
     /* 44 */ __builtin_offsetof(Diag,proof_seen),__builtin_offsetof(Diag,tk_panel),__builtin_offsetof(Diag,tk_ld),__builtin_offsetof(Diag,first_copy_mask),
     /* 48 */ __builtin_offsetof(Diag,glog),__builtin_offsetof(Diag,ng),sizeof(GLogE),__builtin_offsetof(Diag,pre),__builtin_offsetof(Diag,npre),
-    __builtin_offsetof(Diag,t_pre),__builtin_offsetof(Diag,ev_total),__builtin_offsetof(Diag,ev_logged)};
+    __builtin_offsetof(Diag,t_pre),__builtin_offsetof(Diag,ev_total),__builtin_offsetof(Diag,ev_logged),
+    /* 56 */ __builtin_offsetof(Diag,tab),sizeof(TabRow),__builtin_offsetof(Diag,ntab),__builtin_offsetof(Diag,tab_ovf),__builtin_offsetof(Diag,rl_count),
+    __builtin_offsetof(Diag,rl_time),__builtin_offsetof(Diag,t_rl),__builtin_offsetof(Diag,rlhk),__builtin_offsetof(Diag,nrlhk),__builtin_offsetof(Diag,hk_rl_count),
+    /* 66: appended diagnostic ABI, existing indices retained. */
+    __builtin_offsetof(Diag,first_call_ms),__builtin_offsetof(Diag,release_gate),__builtin_offsetof(Diag,pending_releases),
+    __builtin_offsetof(Diag,pending_time),__builtin_offsetof(Diag,pending_valid),__builtin_offsetof(Diag,release_dropped),
+    __builtin_offsetof(Diag,rl_valid),__builtin_offsetof(Diag,background),sizeof(BackgroundId),__builtin_offsetof(Diag,nbackground),
+    __builtin_offsetof(Diag,background_ovf),__builtin_offsetof(Diag,frozen_tab),__builtin_offsetof(Diag,frozen_ntab),
+    __builtin_offsetof(Diag,frozen_ovf),__builtin_offsetof(Diag,frozen_base),__builtin_offsetof(Diag,frozen_base_valid),
+    __builtin_offsetof(Diag,frozen_valid),__builtin_offsetof(Diag,rlhk_delta),__builtin_offsetof(Diag,rlhk_valid),
+    __builtin_offsetof(Diag,ev_id),__builtin_offsetof(Diag,ev_kind),__builtin_offsetof(Diag,ev_seen),
+    __builtin_offsetof(Diag,tab_base_valid),__builtin_offsetof(Diag,hook_clock_valid),__builtin_offsetof(Diag,frozen_background_ovf),
+    __builtin_offsetof(Diag,ev_clock_valid),__builtin_offsetof(Diag,first_call_valid),__builtin_offsetof(Diag,first_draw_valid),
+    __builtin_offsetof(Diag,t_root_valid),__builtin_offsetof(Diag,t_att_valid),__builtin_offsetof(Diag,t_first_valid)};
 
 static uint32_t rd32(const void *p){return *(const uint32_t *)p;}
 static void *ptr(const void *p,uint32_t off){return *(void *const *)((const uint8_t *)p+off);}
 static uint8_t byte(const void *p,uint32_t off){return *((const uint8_t *)p+off);}
 static uint16_t half(const void *p,uint32_t off){return *(const uint16_t *)((const uint8_t *)p+off);}
 static Diag *state(void){
-    Diag *s=(Diag *)grmod_adapter_state;
-    __asm__ volatile("dmb ish" ::: "memory");
+    Diag *s=(Diag *)__atomic_load_n(&grmod_adapter_state,__ATOMIC_ACQUIRE);
     return s&&s->magic==MAGIC?s:0;
 }
 static void listener_noop(void *self){(void)self;}
@@ -155,18 +175,65 @@ static uint32_t cur_ctype(void){
     if(!app)return 2;model=model_get(app);if(!model)return 2;c=controller_get(model);
     return ctype_of(c);
 }
+static void cancel_why(Diag *s,uint32_t reason);
+static void glog_at(Diag *s,uint32_t code,uint32_t kind,uint32_t ctype,uint32_t aux,uint32_t now,uint32_t valid){
+    GLogE *e=&s->glog[s->ng++%NGLOG];   /* the UI task is the sole writer */
+    e->code=code;e->kind=(uint8_t)kind;e->ctype=(uint8_t)ctype;e->aux=(uint8_t)aux;e->pad=(uint8_t)(valid!=0);e->t=valid?now:0;
+}
 static void glog(Diag *s,uint32_t code,uint32_t ctype,uint32_t aux){
-    uint32_t now=0;GLogE *e;
-    if(!grmod_clock_ms(&now))now=0;
-    e=&s->glog[s->ng%NGLOG];e->code=(uint16_t)code;e->ctype=(uint8_t)ctype;e->aux=(uint8_t)aux;e->t=now;s->ng++;
+    uint32_t now=0,valid=(uint32_t)grmod_clock_ms(&now);
+    glog_at(s,code,EVENT_MARKER,ctype,aux,now,valid);
+}
+static void tab_hit(Diag *s,uint32_t id,uint32_t kind,uint32_t now,uint32_t valid){
+    uint32_t i;TabRow *r=0;
+    for(i=0;i<s->ntab;i++)if(s->tab[i].id==id&&s->tab[i].kind==kind){r=&s->tab[i];break;}
+    if(!r){
+        if(s->ntab>=NTAB){s->tab_ovf++;return;}
+        r=&s->tab[s->ntab++];r->id=id;r->kind=(uint8_t)kind;
+        if(kind!=EVENT_MARKER)for(i=0;i<s->nbackground;i++)if(s->background[i].id==id&&s->background[i].kind==kind){r->periodic=1;break;}
+    }
+    r->win=(uint8_t)(kind!=EVENT_MARKER);
+    if(!r->count){r->first=valid?now:0;r->pad=(uint8_t)(valid?1u:0u);}
+    r->count++;r->last=valid?now:0;r->pad=(uint8_t)((r->pad&1u)|(valid?2u:0u));
+}
+static void tab_boundary(Diag *s,uint32_t id,uint32_t now,uint32_t valid){tab_hit(s,id,EVENT_MARKER,now,valid);}
+/* Try once, never spin. Release owns only the mailbox; all consumption and cancellation are on the UI task. */
+static void tab_sync(Diag *s){
+    uint32_t expected=0,n,now,valid,i;
+    if(!__atomic_compare_exchange_n(&s->release_gate,&expected,1u,1,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED))return;
+    n=s->pending_releases;now=s->pending_time;valid=s->pending_valid;
+    s->pending_releases=0;s->pending_time=0;s->pending_valid=0;
+    __atomic_store_n(&s->release_gate,0u,__ATOMIC_RELEASE);
+    if(!n)return;
+    s->nbackground=0;s->background_ovf=s->tab_ovf;
+    for(i=0;i<s->ntab;i++)if(s->tab[i].win&&s->tab[i].kind!=EVENT_MARKER){
+        if(s->nbackground<NTAB){BackgroundId *b=&s->background[s->nbackground++];b->id=s->tab[i].id;b->kind=s->tab[i].kind;}
+        else s->background_ovf++;
+    }
+    zero_words(s->tab,sizeof(s->tab));s->ntab=0;s->tab_ovf=0;
+    s->rl_count+=n;s->rl_seen=s->rl_count;s->rl_time=valid?now:0;s->rl_valid=valid;
+    s->t_rl=s->rl_time;s->tab_base_valid=valid;
+    tab_boundary(s,GK_RELEASE,now,valid);
+    s->tab[0].count=n;
+    if(n>1u){s->tab[0].first=0;s->tab[0].pad&=(uint8_t)~1u;} /* a coalesced batch retained only its last timestamp */
+    glog_at(s,GK_RELEASE,EVENT_MARKER,2,n>255u?255u:n,now,valid);
+    if(s->hook&&(s->diag_on||s->sequence||(s->ld&&(s->ld->running||s->ld->wanted))||s->root))cancel_why(s,R_EXT);
+}
+static void freeze_tab(Diag *s){
+    uint32_t i;
+    s->frozen_ntab=s->ntab;s->frozen_ovf=s->tab_ovf;s->frozen_base=s->t_rl;s->frozen_base_valid=s->tab_base_valid;
+    s->frozen_background_ovf=s->background_ovf;
+    for(i=0;i<s->ntab;i++)s->frozen_tab[i]=s->tab[i];
+    s->frozen_valid=1;
 }
 static void log_ev(Diag *s,uint32_t code,uint32_t ctype,uint32_t aux){
-    static const uint16_t GMAP[NLOGCODE]={GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,0,0,0,0,GK_D1,GK_D2,GK_D3,GK_D4,GK_PD,GK_CANCEL,0,0,0};
+    static const uint16_t GMAP[NLOGCODE]={GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,0,0,0,0,GK_D1,GK_D2,GK_D3,GK_D4,0,GK_CANCEL,0,0,0};
     uint32_t now=0;
     if(GMAP[code])glog(s,GMAP[code],ctype,aux);
     if(s->nlog>=NLOG)return;
     s->log[s->nlog].code=(uint8_t)code;s->log[s->nlog].ctype=(uint8_t)ctype;s->log[s->nlog].aux=(uint8_t)aux;
-    s->log[s->nlog].ms=grmod_clock_ms(&now)?now-s->t_hook:0u;
+    s->log[s->nlog].pad=(uint8_t)(grmod_clock_ms(&now)&&s->hook_clock_valid);
+    s->log[s->nlog].ms=s->log[s->nlog].pad?now-s->t_hook:0u;
     s->nlog++;
 }
 
@@ -207,15 +274,17 @@ static void cat_hex4(char *dst,uint32_t v){
     for(i=0;i<4;i++){uint32_t n=(v>>(12-4*i))&15u;dst[i]=(char)(n<10u?'0'+n:'A'+n-10u);}
     dst[4]=0;
 }
+static void cat_hex8(char *dst,uint32_t v){cat_hex4(dst,v>>16);cat_hex4(dst,v);}
+static void fmt_count(char *l,uint32_t v){if(v>99999u)cat(l,"99K+");else cat_dec(l,v);}
+static void fmt_ms(char *l,uint32_t v,uint32_t valid){if(!valid)cat(l,"-");else if(v>99999u)cat(l,"99S+");else cat_dec(l,v);}
 static void pad(char *dst,uint32_t column){uint32_t n=len(dst);while(n<column&&n<22u){dst[n++]=' ';}dst[n]=0;}
 static const char CTL[3]={'L','Q','O'};
 static void row(Diag *d,uint32_t r,const char *t){text(d,t,8,4+(int32_t)r*15,0xffffffffu);}
 
 static void page_cells(Diag *d){
     uint32_t i;
-    text(d,"DIAG 1E",8,6,0xffffff00u);
-    {char v[4];v[0]='V';v[1]=' ';v[2]=(char)('A'+(int32_t)d->variant);v[3]=0;text(d,v,150,6,0xffffff00u);}
-    if(d->proof)text(d,"PROOF",90,6,0xff00ffffu);
+    text(d,"DIAG 1F FIX",8,6,0xffffff00u);
+    if(d->proof)text(d,"PROOF",170,6,0xff00ffffu);
     for(i=0;i<NCELLS;i++){
         int32_t cx=6+(int32_t)(i%6u)*38,cy=i<6u?24:70;
         text(d,LABEL[i],cx+(LABEL[i][1]?4:13),cy,0xffffffffu);
@@ -227,7 +296,7 @@ static void page_cells(Diag *d){
 }
 static void vname(char *l,uint32_t v){l[0]=0;if(v==4)cat(l,"N");else cat_dec(l,v+1u);pad(l,2);}
 static void page_counts(Diag *d){
-    char l[24];uint32_t v;
+    char l[64];uint32_t v;
     row(d,0,"V  LV C/K   QV C/K");
     for(v=0;v<5;v++){
         vname(l,v);cat_dec(l,d->vs[v].calls[0]>999u?999u:d->vs[v].calls[0]);cat(l,"/");cat_dec(l,d->vs[v].copied[0]>999u?999u:d->vs[v].copied[0]);pad(l,11);
@@ -239,7 +308,7 @@ static void page_counts(Diag *d){
 }
 static void rejtext(char *l,const VStat *v,uint32_t t){if(!v->calls[t])cat(l,"-");else cat_dec(l,v->rej[t]);}
 static void page_rejects(Diag *d){
-    char l[24];uint32_t v,t;
+    char l[64];uint32_t v,t;
     row(d,0,"LAST REJECT LV QV");
     for(v=0;v<5;v++){vname(l,v);rejtext(l,&d->vs[v],0);pad(l,8);rejtext(l,&d->vs[v],1);row(d,1u+v,l);}
     row(d,6,"SURF W H STR FMT");
@@ -249,7 +318,7 @@ static void page_rejects(Diag *d){
     }
 }
 static void page_abs(Diag *d){
-    char l[24];uint32_t v,k;
+    char l[64];uint32_t v,k;
     row(d,0,"ABS X Y W H PAR");
     for(v=0;v<5;v++){
         vname(l,v);
@@ -259,7 +328,7 @@ static void page_abs(Diag *d){
     l[0]=0;cat(l,"NOW ");{char c[2];c[0]=CTL[cur_ctype()];c[1]=0;cat(l,c);}cat(l," VT ");cat_hex4(l,d->controller?rd32(d->controller):0u);row(d,7,l);
 }
 static void page_events(Diag *d){
-    char l[24];
+    char l[64];
     row(d,0,"EVENT COUNTERS");
     l[0]=0;cat(l,"HOOK ");cat_dec(l,d->hook);row(d,1,l);
     l[0]=0;cat(l,"RTF H ");cat_dec(l,d->rootfail_h);cat(l," U ");cat_dec(l,d->rootfail_u);row(d,2,l);
@@ -268,12 +337,12 @@ static void page_events(Diag *d){
     l[0]=0;cat(l,"TICKS ");cat_dec(l,d->ticks);cat(l," LATE ");cat_dec(l,d->late);row(d,5,l);
     l[0]=0;cat(l,"STALE ");cat_dec(l,d->stale);cat(l," SHOT ");cat_dec(l,d->shots);row(d,6,l);
     l[0]=0;cat(l,"PANEL CALLS ");cat_dec(l,d->panel_calls_shot);row(d,7,l);
-    l[0]=0;cat(l,"FIRST DRAW ");cat_dec(l,d->first_draw_ms);cat(l," MS");row(d,8,l);
-    l[0]=0;cat(l,"P");cat_hex4(l,(uint32_t)(uintptr_t)d);cat(l," V ");{char v[2];v[0]=(char)('A'+(int32_t)d->variant);v[1]=0;cat(l,v);}row(d,9,l);
+    l[0]=0;cat(l,"COPY ");fmt_ms(l,d->first_draw_ms,d->first_draw_valid);cat(l," MS");row(d,8,l);
+    l[0]=0;cat(l,"CALL ");fmt_ms(l,d->first_call_ms,d->first_call_valid);cat(l," MS");row(d,9,l);
     l[0]=0;cat(l,"TK1 P ");cat_dec(l,d->tk_panel);cat(l," L ");cat_dec(l,d->tk_ld);row(d,10,l);
 }
 static void page_cancels(Diag *d){
-    char l[24];uint32_t i;
+    char l[64];uint32_t i;
     row(d,0,"CANCELS BY REASON");
     for(i=0;i<NREASON;i+=2){
         l[0]=0;cat(l,REASON[i]);cat(l," ");cat_dec(l,d->cancels[i]);pad(l,11);
@@ -282,54 +351,84 @@ static void page_cancels(Diag *d){
     }
     l[0]=0;cat(l,"LAST ");if(d->last_cancel)cat(l,REASON[d->last_cancel-1u]);else cat(l,"NONE");cat(l," HK ");cat_dec(l,d->last_cancel_hook);row(d,6,l);
     row(d,7,"LAST SHOT MS");
-    l[0]=0;cat(l,"H>R ");cat_dec(l,d->t_root);cat(l," H>A ");cat_dec(l,d->t_att);row(d,8,l);
-    l[0]=0;cat(l,"H>T ");cat_dec(l,d->t_first);cat(l," CLK ");cat_hex4(l,d->t_hook);row(d,9,l);
+    l[0]=0;cat(l,"H>R ");fmt_ms(l,d->t_root,d->t_root_valid);cat(l," H>A ");fmt_ms(l,d->t_att,d->t_att_valid);row(d,8,l);
+    l[0]=0;cat(l,"H>T ");fmt_ms(l,d->t_first,d->t_first_valid);row(d,9,l);
 }
 static void page_log(Diag *d,uint32_t first){
-    char l[24];uint32_t i;
+    char l[64];uint32_t i;
     for(i=0;i<11u;i++){
         uint32_t k=first+i;
         if(k>=d->nlog)break;
-        l[0]=0;cat(l,LOGNAME[d->log[k].code]);cat(l," ");{char c[2];c[0]=CTL[d->log[k].ctype];c[1]=0;cat(l,c);}cat(l," ");cat_dec(l,d->log[k].ms);
+        l[0]=0;cat(l,LOGNAME[d->log[k].code]);cat(l," ");{char c[2];c[0]=CTL[d->log[k].ctype];c[1]=0;cat(l,c);}cat(l," ");fmt_ms(l,d->log[k].ms,d->log[k].pad);
         if(d->log[k].code==L_CALL1||d->log[k].code==L_CALL2||d->log[k].code==L_CALL3||d->log[k].code==L_CALL4||d->log[k].code==L_PANEL||d->log[k].code==L_CANCEL){
             cat(l," R");cat_dec(l,d->log[k].aux);
         }
         row(d,i,l);
     }
 }
-static void gname(char *l,uint32_t code){if(code>=GK_RELEASE&&code<=GK_CANCEL)cat(l,GNAME[code-GK_RELEASE]);else cat_hex4(l,code);}
+static void gname(char *l,uint32_t code,uint32_t kind){
+    if(kind==EVENT_MARKER&&code>=GK_RELEASE&&code<=GK_CANCEL)cat(l,GNAME[code-GK_RELEASE]);
+    else if(kind==EVENT_RAW){cat(l,"R");cat_hex8(l,code);}
+    else{cat(l,"U");cat_hex4(l,code);}
+}
 static void page_glog(Diag *d){
-    char l[24];uint32_t n=d->ng>8u?8u:d->ng,i;
+    char l[64];uint32_t n=d->ng>8u?8u:d->ng,i;
     row(d,0,"LAST 8 EVENTS DT MS");
     for(i=0;i<n;i++){
         const GLogE *e=&d->glog[(d->ng-n+i)%NGLOG],*pv=i?&d->glog[(d->ng-n+i-1u)%NGLOG]:0;
-        l[0]=0;gname(l,e->code);cat(l," ");{char c[2];c[0]=CTL[e->ctype];c[1]=0;cat(l,c);}cat(l," +");cat_dec(l,pv?e->t-pv->t:0u);
+        l[0]=0;gname(l,e->code,e->kind);cat(l," +");fmt_ms(l,pv?e->t-pv->t:0u,pv&&e->pad&&pv->pad);
         row(d,1u+i,l);
     }
-    l[0]=0;cat(l,"UI EV ");cat_dec(l,d->ev_total);cat(l," LOGGED ");cat_dec(l,d->ev_logged);row(d,10,l);
+    l[0]=0;cat(l,"EV ");fmt_count(l,d->ev_total);cat(l," LOG ");fmt_count(l,d->ev_logged);row(d,10,l);
 }
 static void page_pre(Diag *d){
-    char l[24];uint32_t i;
+    char l[64];uint32_t i;
     row(d,0,"BEFORE LAST HOOK MS");
     for(i=0;i<d->npre&&i<8u;i++){
-        l[0]=0;gname(l,d->pre[i].code);cat(l," ");{char c[2];c[0]=CTL[d->pre[i].ctype];c[1]=0;cat(l,c);}cat(l," -");cat_dec(l,d->t_pre-d->pre[i].t);
+        l[0]=0;gname(l,d->pre[i].code,d->pre[i].kind);cat(l," -");fmt_ms(l,d->t_pre-d->pre[i].t,d->hook_clock_valid&&d->pre[i].pad);
         row(d,1u+i,l);
     }
+}
+static void page_tab(Diag *d,uint32_t part){
+    const TabRow *tab=d->frozen_valid?d->frozen_tab:d->tab;
+    uint32_t n=d->frozen_valid?d->frozen_ntab:d->ntab,base=d->frozen_valid?d->frozen_base:d->t_rl;
+    uint32_t valid=d->frozen_valid?d->frozen_base_valid:d->tab_base_valid,i;char l[64];
+    l[0]=0;cat(l,"EVENTS ");cat_dec(l,part+1u);cat(l,"/6");if(d->frozen_valid)cat(l," AT HK");row(d,0,l);
+    for(i=0;i<4u&&part*4u+i<n;i++){
+        const TabRow *r=&tab[part*4u+i];
+        l[0]=0;gname(l,r->id,r->kind);cat(l," N");fmt_count(l,r->count);if(r->periodic)cat(l," B");row(d,1u+i*2u,l);
+        l[0]=0;cat(l,"F");fmt_ms(l,r->first-base,valid&&(r->pad&1u));cat(l," L");fmt_ms(l,r->last-base,valid&&(r->pad&2u));row(d,2u+i*2u,l);
+    }
+    row(d,9,"B:SEEN BEFORE RL");
+    l[0]=0;cat(l,"OVF ");fmt_count(l,d->frozen_valid?d->frozen_ovf:d->tab_ovf);cat(l," BG ");fmt_count(l,d->frozen_valid?d->frozen_background_ovf:d->background_ovf);row(d,10,l);
+}
+static void page_rlhk(Diag *d){
+    char l[64];uint32_t i;
+    row(d,0,"LAST RL>HK OBS MS");
+    for(i=0;i<3u&&i<d->nrlhk;i++){
+        l[0]=0;cat(l,"HK ");fmt_count(l,d->nrlhk-i);cat(l," RL N");fmt_count(l,d->rlhk_delta[i]);row(d,1u+2u*i,l);
+        l[0]=0;if(!d->rlhk_delta[i])cat(l,"NO NEW RL");else if(!d->rlhk_valid[i])cat(l,"UNKNOWN");else fmt_ms(l,d->rlhk[i],1);row(d,2u+2u*i,l);
+    }
+    row(d,7,"OBSERVATION ONLY");row(d,8,"NOT EXPOSURE TIME");
+    l[0]=0;cat(l,"RL ");fmt_count(l,d->rl_count);cat(l," HK ");fmt_count(l,d->hook);row(d,9,l);
+    l[0]=0;cat(l,"MAILBOX DROP ");fmt_count(l,__atomic_load_n(&d->release_dropped,__ATOMIC_RELAXED));row(d,10,l);
 }
 static void draw_panel(Diag *d){
     box(d,0,0,(int32_t)DIAG_W,(int32_t)DIAG_H,0xff101010u);
     box(d,0,0,(int32_t)DIAG_W,2,0xffffffffu);box(d,0,(int32_t)DIAG_H-2,(int32_t)DIAG_W,2,0xffffffffu);
     box(d,0,0,2,(int32_t)DIAG_H,0xffffffffu);box(d,(int32_t)DIAG_W-2,0,2,(int32_t)DIAG_H,0xffffffffu);
     switch(d->page){
-    case 1:page_counts(d);break;
-    case 2:page_rejects(d);break;
-    case 3:page_abs(d);break;
-    case 4:page_events(d);break;
-    case 5:page_cancels(d);break;
-    case 6:page_log(d,0);break;
-    case 7:page_log(d,11);break;
-    case 8:page_glog(d);break;
-    case 9:page_pre(d);break;
+    case 1:case 2:case 3:case 4:case 5:case 6:page_tab(d,d->page-1u);break;
+    case 7:page_rlhk(d);break;
+    case 8:page_counts(d);break;
+    case 9:page_rejects(d);break;
+    case 10:page_abs(d);break;
+    case 11:page_events(d);break;
+    case 12:page_cancels(d);break;
+    case 13:page_log(d,0);break;
+    case 14:page_log(d,11);break;
+    case 15:page_glog(d);break;
+    case 16:page_pre(d);break;
     default:page_cells(d);break;
     }
 }
@@ -388,14 +487,16 @@ static int attach_wanted(Diag *s,void *root,void *controller){
     if(!child_vector(root,&begin,&end))return 0;
     if(s->diag_on&&!s->diag_attached){
         if(!s->view||ptr(s->view,4))return 0;
-        view_add(root,s->view);s->root=root;s->controller=controller;view_visible(s->view,1);s->diag_attached=1;
+        view_add(root,s->view);s->root=root;s->controller=controller;view_visible(s->view,1);
+        ((two_fn)(uintptr_t)(*(uint32_t **)root)[8])(root,s->view);
+        s->diag_attached=1;
     }
     if(s->ld&&s->ld->wanted&&!s->ld->attached){
         for(i=0;i<NV;i++)if(!s->ld->views[i]||ptr(s->ld->views[i],4))return 0;
         for(i=0;i<NV;i++)view_add(root,s->ld->views[i]);
         s->root=root;s->controller=controller;
         for(i=0;i<NV;i++)view_visible(s->ld->views[i],1);
-        if(s->variant==0)((two_fn)(uintptr_t)(*(uint32_t **)root)[8])(root,s->ld->views[0]);   /* layout request, see the header */
+        ((two_fn)(uintptr_t)(*(uint32_t **)root)[8])(root,s->ld->views[0]);
         s->ld->attached=1;
     }
     s->root=root;s->controller=controller;
@@ -571,24 +672,31 @@ static void cancel_why(Diag *s,uint32_t reason){
     disarm(s);drop_loaded(s);s->sequence=0;s->marked=0;s->proof=0;s->reattach=0;s->diag_on=0;
     detach_all(s);
 }
-static Diag *create(void);
+/* Task ownership is unknown. Do not allocate, log, stop timers or touch a native tree here. */
 void grmod_cancel(void){
-    Diag *s=state();
-    if(!s){s=create();if(!s)return;}             /* the first shutter release makes the block, so the log starts there */
-    glog(s,GK_RELEASE,cur_ctype(),0);
-    cancel_why(s,R_EXT);
+    Diag *s=state();uint32_t expected=0,now=0,valid;
+    if(!s)return;
+    if(!__atomic_compare_exchange_n(&s->release_gate,&expected,1u,1,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)){
+        __atomic_fetch_add(&s->release_dropped,1u,__ATOMIC_RELAXED);return;
+    }
+    valid=(uint32_t)grmod_clock_ms(&now);
+    s->pending_releases++;s->pending_time=valid?now:0;s->pending_valid=valid;
+    __atomic_store_n(&s->release_gate,0u,__ATOMIC_RELEASE);
 }
 
 static void update(Diag *s){
     void *controller=0,*root;uint32_t now=0,elapsed,page,changed;int have_clock,r;
+    tab_sync(s);
+    if(!s->diag_on&&!s->sequence&&!(s->ld&&(s->ld->running||s->ld->wanted)))return;
     root=find_root(s,&s->rootfail_u,&controller);
     if(!root){cancel_why(s,R_ROOT);return;}
     if(!attach_wanted(s,root,controller)){cancel_why(s,R_ATTACH);return;}
     have_clock=grmod_clock_ms(&now);
-    if(s->first_pending){s->first_pending=0;if(have_clock)s->t_first=now-s->t_hook;}
+    if(s->first_pending){s->first_pending=0;s->t_first_valid=(uint32_t)(have_clock&&s->hook_clock_valid);if(s->t_first_valid)s->t_first=now-s->t_hook;}
     if(have_clock){if(s->last_tick&&now-s->last_tick>100u)s->late++;s->last_tick=now;}
     s->diag_ticks++;
-    elapsed=have_clock?now-s->diag_start:s->diag_ticks*33u;
+    /* A recovered clock cannot supply the missing timestamp at this hook. */
+    elapsed=(have_clock&&s->hook_clock_valid)?now-s->diag_start:s->diag_ticks*33u;
     page=(elapsed/PAGE_MS)%NPAGES;changed=page!=s->page;s->page=page;
     if(s->sequence){
         if(!s->marked){s->cell[C_FILM+s->step]=G_RUN;s->marked=1;refresh(s);}
@@ -621,7 +729,7 @@ static void update(Diag *s){
     }
     if(s->diag_on&&!s->sequence&&(changed||(s->diag_ticks&3u)==0))refresh(s);
     if(s->diag_on&&!s->sequence){
-        int expired=have_clock?(now-s->diag_start>=DIAG_MS):(s->diag_ticks>=DIAG_TICKS);
+        int expired=(have_clock&&s->hook_clock_valid)?(now-s->diag_start>=DIAG_MS):(s->diag_ticks>=DIAG_TICKS);
         if(expired){
             if(s->diag_attached){detach_one(s->root,s->view);s->diag_attached=0;view_invalidate(s->root);}
             s->diag_on=0;
@@ -631,10 +739,9 @@ static void update(Diag *s){
     arm(s,now,have_clock);
 }
 
-static Diag *create(void){
-    Diag *s=state();uint32_t i;
-    if(s)return s;
-    s=(Diag *)heap_alloc(sizeof(*s));if(!s)return 0;
+static Diag *alloc_block(void){
+    Diag *s=(Diag *)heap_alloc(sizeof(*s));uint32_t i;
+    if(!s)return 0;
     zero_words(s,sizeof(*s));
     for(i=0;i<24;i++)s->view_vtable[i]=((const uint32_t *)(uintptr_t)0x53c0a8a0u)[i];
     s->view_vtable[2+0x4c/4]=(uint32_t)(uintptr_t)grmod_draw;
@@ -643,17 +750,23 @@ static Diag *create(void){
     s->timer_vtable[2]=(uint32_t)(uintptr_t)grmod_timer_expired;
     s->listener.vtable=s->timer_vtable;
     s->bitmap.width=DIAG_W;s->bitmap.height=DIAG_H;
-    s->timer_model=timer_get();
-    s->magic=MAGIC;
-    __asm__ volatile("dmb ish" ::: "memory");
-    grmod_adapter_state=s;return s;
+    s->magic=MAGIC;                              /* published last: all or nothing */
+    __atomic_store_n(&grmod_adapter_state,(void *)s,__ATOMIC_RELEASE);return s;
+}
+static Diag *create(void){
+    Diag *s=state();
+    if(!s)s=alloc_block();
+    if(s&&!s->timer_model)s->timer_model=timer_get();   /* not at allocation: the event hook may run before the timer model exists */
+    return s;
 }
 
 void grmod_on_shot(void){
     Diag *s;void *controller=0,*root;uint32_t now=0,later=0,i;int clock_ok;
     s=create();if(!s)return;                      /* the counters live in the block: made before anything can return early */
+    tab_sync(s);                                  /* finish the previous diagnostic on the UI task before resetting this shot */
     s->hook++;
-    clock_ok=grmod_clock_ms(&now);
+    clock_ok=grmod_clock_ms(&now);s->hook_clock_valid=(uint32_t)clock_ok;
+    s->first_call_ms=0;s->first_call_valid=0;s->first_draw_valid=0;s->t_root_valid=0;s->t_att_valid=0;s->t_first_valid=0;
     s->t_hook=now;s->t_root=0;s->t_att=0;s->t_first=0;s->first_pending=0;s->first_draw_ms=0;s->panel_calls_shot=0;
     s->first_call_mask=0;s->first_copy_mask=0;s->ld_copies_shot=0;s->tk_panel=0;s->tk_ld=0;s->last_tick=now;s->nlog=0;
     {   /* the eight events before this hook, with their distance to it */
@@ -661,13 +774,24 @@ void grmod_on_shot(void){
         s->t_pre=now;s->npre=n;
         for(k=0;k<n;k++)s->pre[k]=s->glog[(s->ng-n+k)%NGLOG];
     }
+    {   /* The last observed release attempt to this callback; delta counts attempts, not photos. */
+        uint32_t i;
+        for(i=2;i;i--){s->rlhk[i]=s->rlhk[i-1u];s->rlhk_delta[i]=s->rlhk_delta[i-1u];s->rlhk_valid[i]=s->rlhk_valid[i-1u];}
+        s->rlhk_delta[0]=s->rl_count-s->hk_rl_count;
+        s->rlhk_valid[0]=(uint32_t)(s->rlhk_delta[0]&&clock_ok&&s->rl_valid);
+        s->rlhk[0]=s->rlhk_valid[0]?now-s->rl_time:0xffffffffu;
+        s->nrlhk++;s->hk_rl_count=s->rl_count;
+        tab_boundary(s,GK_HOOK,now,(uint32_t)clock_ok);
+        freeze_tab(s);
+        for(i=0;i<s->ntab;i++)s->tab[i].win=0;
+    }
     log_ev(s,L_HOOK,cur_ctype(),0);
     root=find_root(s,&s->rootfail_h,&controller);
     if(!root){log_ev(s,L_ROOTFAIL,2,0);cancel_why(s,R_ROOT);return;}
-    if(grmod_clock_ms(&later))s->t_root=later-now;
+    s->t_root_valid=(uint32_t)(grmod_clock_ms(&later)&&clock_ok);if(s->t_root_valid)s->t_root=later-now;
     disarm(s);s->transition=0;
     drop_loaded(s);s->reattach=0;
-    s->variant=(s->hook+2u)%3u;                  /* hooks 1,4,7: A timer ticks plus layout request; 2,5,8: B steps inside the hook; 3,6,9: C control */
+    s->variant=0;                               /* retained ABI field; every shot uses the repaired path */
     s->shots++;
     for(i=0;i<NCELLS;i++)s->cell[i]=G_GREY;
     for(i=0;i<3;i++)s->info[i][0]=0;
@@ -682,56 +806,66 @@ void grmod_on_shot(void){
     }
     if(!attach_wanted(s,root,controller)){cancel_why(s,R_ATTACH);return;}
     refresh(s);
-    if(s->variant==1){                           /* B: the Loaded steps up to the attach run here, as the panel's own attach did */
-        uint32_t k;
-        for(k=S_FILM;k<=S_ATTACH&&s->sequence;k++){s->step=k;run_step(s);}
-        if(s->sequence)s->step=S_START;
-        refresh(s);
-    }
-    if(grmod_clock_ms(&later))s->t_att=later-now;
+    s->t_att_valid=(uint32_t)(grmod_clock_ms(&later)&&clock_ok);if(s->t_att_valid)s->t_att=later-now;
     s->first_pending=1;
     arm(s,now,clock_ok);
 }
 
-/* The sixth hook: every UI event the camera dispatches (0x53228ab4), logged once per id and 500 ms with the clock time. */
+/* Native Event: uint16 id at +0, payload pointer at +4, receiver pointer at +8.
+ * Only the verified message receiver permits one aligned uint32 raw-id read from its payload. */
 void grmod_on_event(void *app,const uint16_t *event){
-    Diag *s=state();uint32_t id,now=0,slot;
+    Diag *s=state();uint32_t id,kind=EVENT_UI,now=0,slot,valid;uintptr_t receiver,payload;
     (void)app;
-    if(!s||!event)return;
+    if(!s){                                      /* UI task only; a failed first allocation is remembered, the shot may still recover. */
+        if(grmod_alloc_flag)return;
+        s=alloc_block();
+        if(!s){grmod_alloc_flag=1;return;}
+    }
+    tab_sync(s);
+    if(!event)return;
     id=event[0];
-    s->ev_total++;
-    if(!grmod_clock_ms(&now))return;
-    slot=id&15u;
-    if(s->ev_id[slot]==id&&now-s->ev_t[slot]<500u)return;
-    s->ev_id[slot]=(uint16_t)id;s->ev_t[slot]=now;
-    s->ev_logged++;
-    {GLogE *e=&s->glog[s->ng%NGLOG];e->code=(uint16_t)id;e->ctype=2;e->aux=0;e->t=now;s->ng++;}
+    if(id==0x0199u){
+        receiver=(uintptr_t)ptr(event,8);
+        if(receiver&&!(receiver&3u)&&rd32((const void *)receiver)==0x53b1f2ccu){
+            payload=(uintptr_t)ptr(event,4);
+            if(payload&&!(payload&3u)){id=rd32((const void *)payload);kind=EVENT_RAW;}
+        }
+    }
+    s->ev_total++;valid=(uint32_t)grmod_clock_ms(&now);
+    tab_hit(s,id,kind,now,valid);
+    slot=(id^(id>>16)^kind)&15u;
+    if(s->ev_seen[slot]&&s->ev_id[slot]==id&&s->ev_kind[slot]==kind&&valid&&s->ev_clock_valid[slot]&&now-s->ev_t[slot]<500u)return;
+    s->ev_id[slot]=id;s->ev_kind[slot]=(uint8_t)kind;s->ev_seen[slot]=1;s->ev_clock_valid[slot]=(uint8_t)valid;s->ev_t[slot]=valid?now:0;
+    s->ev_logged++;glog_at(s,id,kind,2,0,now,valid);
 }
 
 void grmod_timer_expired(void *listener,uint32_t id){
     Diag *s=state();
-    if(!s||listener!=&s->listener||!id||id!=s->timer_id)return;
+    if(!s)return;tab_sync(s);
+    if(!s->hook||listener!=&s->listener||!id||id!=s->timer_id)return;
     s->timer_id=0;
     s->ticks++;
     if(s->transition)return;
     update(s);
 }
 void grmod_before_transition(void *old_controller,uint32_t destination_id){
-    Diag *s=state();uint32_t id=destination_id-0x08000000u;if(!s)return;
+    Diag *s=state();uint32_t id=destination_id-0x08000000u,now=0,valid;if(!s)return;tab_sync(s);if(!s->hook)return;
     ++s->transition;s->trans_b++;
+    valid=(uint32_t)grmod_clock_ms(&now);tab_boundary(s,GK_BEFORE,now,valid);
     log_ev(s,L_BEFORE,ctype_of(old_controller),id&0xffu);
     if(id<=2||(id>=0x0cu&&id<=0x11u)){disarm(s);detach_all(s);}
     else cancel_why(s,R_TRANS);
 }
 void grmod_after_transition(void){
-    Diag *s=state();if(!s||!s->transition)return;
+    Diag *s=state();uint32_t now=0,valid;if(!s)return;tab_sync(s);if(!s->hook||!s->transition)return;
     s->trans_a++;
+    valid=(uint32_t)grmod_clock_ms(&now);tab_boundary(s,GK_AFTER,now,valid);
     log_ev(s,L_AFTER,cur_ctype(),0);
     if(--s->transition)return;
     update(s);
 }
 void grmod_before_canvas_delete(void *root){
-    Diag *s=state();if(s&&s->root==root)cancel_why(s,R_CANVAS);
+    Diag *s=state();if(!s)return;tab_sync(s);if(s->hook&&s->root==root)cancel_why(s,R_CANVAS);
 }
 void grmod_before_audio_shutdown(void){}
 
@@ -768,8 +902,8 @@ void grmod_draw(void *view,void *surface){
         if(!(s->first_call_mask&(1u<<4))){
             uint32_t now=0;
             s->first_call_mask|=1u<<4;
-            if(grmod_clock_ms(&now))s->first_draw_ms=now-s->t_hook;
-            s->tk_panel=s->diag_ticks;
+            s->first_call_valid=(uint32_t)(grmod_clock_ms(&now)&&s->hook_clock_valid);
+            if(s->first_call_valid)s->first_call_ms=now-s->t_hook;
         }
     }
     if(!surface||!s->root||s->transition)REJECT(1);
@@ -809,6 +943,13 @@ void grmod_draw(void *view,void *surface){
     NATIVE(copy_fn,0x5320a020u)(context,surface,absolute[0],absolute[1],
         (uint32_t)sx,(uint32_t)sy,(uint32_t)(x1-x0),(uint32_t)(y1-y0),bitmap,source);
     vs->copied[ct]++;rej=0;
+    if(idx==4&&!(s->first_copy_mask&(1u<<4))){
+        uint32_t now=0;
+        s->first_copy_mask|=1u<<4;s->tk_panel=s->diag_ticks;
+        s->first_draw_valid=(uint32_t)(grmod_clock_ms(&now)&&s->hook_clock_valid);
+        if(s->first_draw_valid)s->first_draw_ms=now-s->t_hook;
+        glog_at(s,GK_PD,EVENT_MARKER,ct,0,now,s->first_draw_valid);
+    }
     if(idx<4){if(!s->ld_copies_shot)s->tk_ld=s->diag_ticks;s->ld_copies_shot++;}
 finish:
     if(vs){

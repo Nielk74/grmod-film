@@ -1,8 +1,8 @@
-"""Stage 1d (diagnostic) scenarios, run in the emulator on the delivered image (LOADED_VARIANT=diag).
+"""Stage 1f diagnostic scenarios on the linked ARM image (LOADED_VARIANT=diagf).
 
 For every failure cell the failure is provoked and the cells, the text and everything else are checked: the right cell is
-red, the later ones grey, the earlier ones green, shooting is not delayed (the hook itself only makes the panel's own two
-allocations), nothing else breaks and the next shot starts again. The all-ok case equals the JS reference pixels.
+red, the later ones grey, the earlier ones green, and the next shot starts again.
+The successful case equals the JS reference pixels. Hardware latency is not measured.
 """
 import hashlib
 import json
@@ -26,7 +26,13 @@ LAYOUT = ['ld', 'cell', 'step', 'film', 'shots', 'ld_pixels', 'ld_engine', 'ld_v
           'vs', 'sizeof_vs', 'hook', 'rootfail_h', 'rootfail_u', 'last_vt', 'trans_b', 'trans_a', 'ticks', 'stale', 'late', 'cancels', 'last_cancel', 'proof',
           'page', 'variant', 't_root', 't_att', 't_first', 'first_draw_ms', 'panel_calls_shot', 'log', 'nlog', 'surf', 'sizeof_log', 'ld_copies_shot',
           'last_cancel_hook', 'reattach', 'proof_seen', 'tk_panel', 'tk_ld', 'first_copy_mask',
-          'glog', 'ng', 'sizeof_glog', 'pre', 'npre', 't_pre', 'ev_total', 'ev_logged']
+          'glog', 'ng', 'sizeof_glog', 'pre', 'npre', 't_pre', 'ev_total', 'ev_logged',
+          'tab', 'sizeof_tabrow', 'ntab', 'tab_ovf', 'rl_count', 'rl_time', 't_rl', 'rlhk', 'nrlhk', 'hk_rl_count',
+          'first_call_ms', 'release_gate', 'pending_releases', 'pending_time', 'pending_valid', 'release_dropped', 'rl_valid',
+          'background', 'sizeof_background', 'nbackground', 'background_ovf', 'frozen_tab', 'frozen_ntab', 'frozen_ovf',
+          'frozen_base', 'frozen_base_valid', 'frozen_valid', 'rlhk_delta', 'rlhk_valid', 'ev_id', 'ev_kind', 'ev_seen',
+          'tab_base_valid', 'hook_clock_valid', 'frozen_background_ovf', 'ev_clock_valid', 'first_call_valid', 'first_draw_valid',
+          't_root_valid', 't_att_valid', 't_first_valid']
 PROOF_COL = [0xff0000ff, 0xff00ff00, 0xffff0000, 0xff00ffff]
 COLOUR = {GREY: 0xff5a5a5f, RUN: 0xff14a0fa, OK: 0xff46be28, BAD: 0xff2828dc}
 CELL_NAMES = ['1 hook+clock', '2 root', '3 film', '4 state', '5A top buffer', '5B bottom buffer', '5C counter buffer',
@@ -85,17 +91,27 @@ class D(cl.LoadedFixture):
         out = []
         for k in range(max(0, n - 160), n):
             at = self.s() + self.L['glog'] + (k % 160) * self.L['sizeof_glog']
-            w0 = self.get(at)
-            out.append((w0 & 0xffff, (w0 >> 16) & 255, (w0 >> 24) & 255, self.get(at + 4)))
+            ctype, aux, kind, valid = self.uc.mem_read(at + 4, 4)
+            out.append((self.get(at), ctype, aux, self.get(at + 8), kind, valid))
         return out
 
     def pre(self):
+        return [(self.get(self.s() + self.L['pre'] + k * self.L['sizeof_glog']),
+                 self.get(self.s() + self.L['pre'] + k * self.L['sizeof_glog'] + 8))
+                for k in range(self.v('npre'))]
+
+    def tab(self):
         out = []
-        for k in range(self.v('npre')):
-            at = self.s() + self.L['pre'] + k * self.L['sizeof_glog']
-            w0 = self.get(at)
-            out.append((w0 & 0xffff, self.get(at + 4)))
+        for k in range(self.v('ntab')):
+            at = self.s() + self.L['tab'] + k * self.L['sizeof_tabrow']
+            win, before, kind, valid = self.uc.mem_read(at + 4, 4)
+            out.append((self.get(at), win, before, self.get(at + 8), self.get(at + 12), self.get(at + 16), kind, valid))
         return out
+
+    def flush_release(self):
+        event = ca.EVENT + 0x400
+        self.uc.mem_write(event, struct.pack('<H2xII', 0x199, 0, 0))
+        self.call('grmod_on_event', ca.APP, event)
 
     def cancels(self):
         return [self.get(self.s() + self.L['cancels'] + 4 * k) for k in range(10)]
@@ -143,15 +159,15 @@ def verify(data, segments, symbols):
     manifest = json.loads((BUILD/'payload-manifest.json').read_text(encoding='utf-8'))
     slot_film = {x['look']: x['film'] for x in manifest['slots']}
 
-    # ---- A. the first shot of a session is variant A (timer ticks plus layout request): allocations, panel, steps, proof, real moment
+    # ---- A. allocations, panel, timer steps with explicit layout, proof, real moment
     p = new()
     base = len(p.allocations)
     p.call('grmod_on_shot')
     root = p.roots[0]
     ok(p.get(ca.ANCHOR) != 0 and p.get(p.s()) == 0x44474c47, 'diag state word and magic')
-    ok([s for _, s in p.allocations[base:]] == [p.L['sizeof_diag'], 248, 4], 'the hook makes only the panel allocations (block, view, one child-list slot): shooting is not delayed')
+    ok([s for _, s in p.allocations[base:]] == [p.L['sizeof_diag'], 248, 4], 'the hook allocates the diagnostic block, panel and child-list slot; hardware latency is not measured')
     ok(p.L['sizeof_diag'] <= 172 * 1024, ('diag block size', p.L['sizeof_diag']))
-    ok(p.v('hook') == 1 and p.v('variant') == 0 and p.v('shots') == 1, 'first shot: hook 1, variant A')
+    ok(p.v('hook') == 1 and p.v('variant') == 0 and p.v('shots') == 1, 'first completion: one consistent fixed layout mode')
     ok(p.children(root) == [p.diag_view()] and len(p.timers()) == 1, 'one panel view, one timer')
     ok(p.cells() == [OK, OK] + [GREY] * 10, ('cells at the shot', p.cells()))
     ok(p.info()[1] == 'SHOT 1' and p.info()[2] == 'P%04X' % (p.s() & 0xffff), ('info text', p.info()))
@@ -199,58 +215,42 @@ def verify(data, segments, symbols):
     want = cl.js_hashes([cl.jscase('shot', slot_film[75], 1, 1, 33)])[0][1:]
     ok(p.ld_hashes() == want, 'after the proof the real moment starts and its first frame equals the JS reference')
     start = p.now
-    while p.timers() and p.now - start < 18000:
+    while p.timers() and p.now - start < 30000:
         p.fire(33)
         if not p.children(root):
-            ok(p.now - start + 1000 + 20 * 33 + 33 * 31 >= 14900, 'the panel stays about fifteen seconds')
+            ok(p.now - start + 1000 + 20 * 33 + 33 * 31 >= 25400, 'the panel stays about twenty-five and a half seconds')
     ok(len(p.children(root)) == 0 and not p.timers(), 'the panel and everything else are gone after the panel window')
-    checks.append('first shot (variant A): hook makes 3 allocations, two ticks per step, twelve cells green, proof patterns (outline, block, digit, transparent rest) in all four buffers '
-                  'and on the screen through the original canvas draw for one second, then the real moment whose first frame equals the JS reference, everything gone after the 15 s window')
+    checks.append('first shot: hook makes 3 allocations, two ticks per step, twelve cells green, proof patterns (outline, block, digit, transparent rest) in all four buffers '
+                  'and on the screen through the original canvas draw for one second, then the real moment whose first frame equals the JS reference, everything gone after the 25.5 s window')
 
-    # ---- A2. layout (stage 1e's field finding): a view attached to a clean root keeps the rectangle 0,0,0,0 unless the root is asked to lay out its children
-    def session(variant):
-        q = new()
-        for _ in range(variant):
-            q.call('grmod_on_shot')
-            q.call('grmod_cancel')
-            q.now += 5000
-        q.call(0x53391b14, q.roots[0])                          # the camera has just painted: the root is clean
-        ok(tuple(q.uc.mem_read(q.roots[0] + 0x9c, 2)) == (0, 0), 'the root is clean before the shot')
-        q.call('grmod_on_shot')
-        return q
-    VIEWRECT = list(cl.VIEWS)
-    for variant in (0, 1, 2):
-        q = session(variant)
-        ok(q.v('variant') == variant, ('variant', variant, q.v('variant')))
-        if variant == 1:
-            ok(q.cells() == [OK] * 10 + [GREY] * 2 and len(q.children(q.roots[0])) == 5, ('variant B runs the steps up to the attach inside the hook', q.cells()))
-            ok(q.v('t_att') == 0 or True, 'timing')
-            for _ in range(4):
-                q.tick()
-        else:
-            ok(q.cells() == [OK, OK] + [GREY] * 10, 'variants A and C run the steps on timer ticks')
-            for _ in range(20):
-                q.tick()
-        ok(q.cells() == [OK] * 12 and len(q.children(q.roots[0])) == 5, f'variant {variant}: sequence ok')
+    # ---- A2. paint between ticks, then repeat successful shots on the same retained views.
+    q = new()
+    for shot in range(1, 4):
         q.call(0x53391b14, q.roots[0])
+        q.call('grmod_on_shot')
+        ok(q.v('variant') == 0, 'every shot uses the layout fix')
+        ok(q.cells() == [OK, OK] + [GREY] * 10, 'Loaded allocation stays on timer ticks')
+        q.call(0x53391b14, q.roots[0])
+        ok(q.vs(4)['copied'][0] > 0, 'panel draws on the first clean-root paint')
+        for _ in range(20):
+            q.tick()
+            q.call(0x53391b14, q.roots[0])
         rects = [struct.unpack('<4i', q.uc.mem_read(v + 0x30, 16)) for v in q.ld_views()]
-        if variant == 0:
-            ok(rects == VIEWRECT, ('variant A: the root was asked to lay out its new children, the views have their rectangles', rects))
-            ok(all(q.vs(i)['copied'][0] >= 1 for i in range(4)), 'variant A: the four views draw')
-        else:
-            ok(all(r == (0, 0, 0, 0) for r in rects), (f'variant {variant}: no layout request, the views keep 0,0,0,0 (the 1e field finding)', rects))
-            ok(all(q.vs(i)['last_rej'][0] == 11 and q.vs(i)['copied'][0] == 0 for i in range(4)), f'variant {variant}: every draw rejected with code 11')
+        ok(rects == list(cl.VIEWS), ('requested rectangles on every shot', shot, rects))
+        ok(all(q.vs(i)['copied'][0] >= shot for i in range(4)), 'four views copy on each successful shot')
         steps = 0
         while q.v('proof') and steps < 100:
             q.fire(33)
             steps += 1
-        ok(30 <= steps <= 33, f'variant {variant}: proof one second ({steps})')
+        ok(30 <= steps <= 33, f'completion {shot}: proof lasts one second ({steps})')
         q.fire(33)
-        want = cl.js_hashes([cl.jscase('shot', slot_film[75], q.v('shots'), 1, 33)])[0][1:]
-        ok(q.ld_hashes() == want, f'variant {variant}: real moment after the proof equals the JS reference')
+        want = cl.js_hashes([cl.jscase('shot', slot_film[75], shot, 1, 33)])[0][1:]
+        ok(q.ld_hashes() == want, 'real moment after proof equals JS reference')
+        q.call('grmod_cancel')
+        q.flush_release()
+        q.now += 5000
         q.canaries()
-    checks.append('layout, reproduced with the original native layout pass on a clean root: variant A (timer plus layout request) gives the four views their rectangles and they draw; '
-                  'variants B (steps inside the hook) and C (control) leave 0,0,0,0 and every draw is rejected with code 11, as in the 1e field video')
+    checks.append('layout: panel and all four views paint on a clean root; three sequential successful completions with paint between ticks reuse valid geometry, timer-only steps and JS-identical animation')
 
     # ---- B. failures of the film read
     def run_to_end(q, ticks=20):
@@ -268,8 +268,10 @@ def verify(data, segments, symbols):
         run_to_end(q)
         ok(q.cells() == expected(2), (name, q.cells()))
         ok(q.info()[0] == text, (name, q.info()))
+        q.call(0x53391b14, q.roots[0])
+        ok(q.vs(4)['copied'][0] > 0, f'{name}: error panel actually copied')
         ok(q.ld() == 0 and q.children(q.roots[0]) == [q.diag_view()], f'{name}: only the panel is attached, no Loaded state')
-        for _ in range(600):
+        for _ in range(800):
             q.fire(33)
         ok(not q.children(q.roots[0]) and not q.timers(), f'{name}: the panel goes after its window')
         q.canaries()
@@ -365,9 +367,9 @@ def verify(data, segments, symbols):
     for _ in range(25):
         q.tick()
     ok(q.cells()[0] == BAD and q.cells()[10] == BAD and q.ld() != 0 and len(q.children(q.roots[0])) == 1, ('no clock: loaded_start cannot be given a time', q.cells()))
-    for _ in range(600):
+    for _ in range(800):
         q.fire(33)
-    ok(not q.children(q.roots[0]) and not q.timers(), 'no clock: the panel leaves after 182 ticks')
+    ok(not q.children(q.roots[0]) and not q.timers(), 'no clock: the panel leaves after 773 ticks')
     q.clock_ok = True
     q.active = cl.OTHER
     q.call('grmod_on_shot')
@@ -386,7 +388,8 @@ def verify(data, segments, symbols):
     for _ in range(24):
         q.tick()
     q.call('grmod_cancel')
-    ok(not q.children(q.roots[0]) and not q.timers(), 'cancel clears the panel and the four views at once')
+    q.flush_release()
+    ok(not q.children(q.roots[0]) and not q.timers(), 'UI consumption of a release clears panel, four views and timer')
     q.call('grmod_on_shot')
     for _ in range(24):
         q.tick()
@@ -399,7 +402,7 @@ def verify(data, segments, symbols):
     ok(q.s() and not q.children(q.roots[1]) and not q.timers(), 'canvas deletion cancels')
     q.canaries()
     ok(q.audio_calls == [], 'no audio entry reached')
-    checks.append('no clock: the panel shows cell 1 red and leaves after 182 ticks; an unexpected controller: nothing drawn; a menu transition, cancel and canvas deletion clear the panel and the four views and the timer at once; '
+    checks.append('no clock: the panel shows cell 1 red and leaves after 773 ticks; an unexpected controller: nothing drawn; a menu transition, cancel and canvas deletion clear the panel and the four views and the timer at once; '
                   'a shooting transition detaches everything and reattaches the panel and the four views')
 
     # ---- F. many shots: one set of allocations, no growth
@@ -447,7 +450,8 @@ def verify(data, segments, symbols):
     q = new()
     q.call('grmod_on_shot')
     q.call('grmod_cancel')
-    ok(q.cancels()[9] == 1 and q.v('last_cancel') == 10 and not q.children(q.roots[0]), 'external cancel counted (the release hook calls it)')
+    q.flush_release()
+    ok(q.cancels()[9] == 1 and q.v('last_cancel') == 10 and not q.children(q.roots[0]), 'external cancel counted (the UI task consumes the release mailbox)')
     q.call('grmod_on_shot')
     q.call('grmod_before_transition', cl.LV, 0x08000020)
     ok(q.cancels()[7] == 1 and q.v('trans_b') == 1, 'menu destination: reason TRANS, before count')
@@ -525,7 +529,9 @@ def verify(data, segments, symbols):
                   'first call and first draw of every view logged once with the controller type; reject codes 0, 5, 6, 7, 8, 9, 11, 12 and 13 reproduced on a real view object')
 
     # G5. a late repaint: ticks late and a moment found already over without ever being painted
-    q = session(0)
+    q = new()
+    q.call(0x53391b14, q.roots[0])
+    q.call('grmod_on_shot')
     for _ in range(20):
         q.tick()
     q.fire(250)
@@ -538,7 +544,9 @@ def verify(data, segments, symbols):
     ok(q.v('ld_copies_shot') == 0, 'nothing was painted')
     q.fire(3000)
     ok(q.v('stale') == 1 and 15 in [e[0] for e in q.log()], ('the moment found over at its first tick without a paint is counted stale', q.v('stale'), q.log()))
-    q = session(0)
+    q = new()
+    q.call(0x53391b14, q.roots[0])
+    q.call('grmod_on_shot')
     for _ in range(20):
         q.tick()
     q.call(0x53391b14, q.roots[0])
@@ -561,54 +569,97 @@ def verify(data, segments, symbols):
     q.canaries()
     checks.append('H>R, H>A (hook to root found and to attached) and H>T (hook to first tick) are kept per shot')
 
-    # ---- H. the global event log, the release hook, the sixth hook (UI events), the snapshot before the last hook
+    # ---- H. who allocates and when, the distinct-id table, RL to HK, the cost per dispatched event
+    ev = ca.EVENT + 0x400
+
+    def evt(q, ident, dt=0):
+        q.now += dt
+        q.uc.mem_write(ev, struct.pack('<H2xII', ident, 0, 0))
+        q.call('grmod_on_event', ca.APP, ev)
+
+    # H1. the release hook never allocates; the first UI event allocates the block once, with nothing else touched
     q = new()
+    n0 = len(q.allocations)
     q.call('grmod_cancel')
-    ok(q.s() != 0 and q.v('ng') == 2 and q.glog()[0][0] == 0x1001 and q.glog()[1][0] == 0x100b and q.cancels()[9] == 1, 'the first shutter release creates the block and is the first log entry')
-    q.now += 700
-    q.call('grmod_on_shot')
-    q.now += 33
-    evid = struct.unpack('<H', q.uc.mem_read(ca.EVENT, 2))[0]
-    q.fire(33)
-    log = q.glog()
-    ok(any(e[0] == evid for e in log) and q.v('ev_total') >= 1, ('the sixth hook logs the UI event id with a clock time', hex(evid), [hex(e[0]) for e in log]))
-    logged = q.v('ev_logged')
-    for _ in range(5):
-        q.fire(33)
-    ok(q.v('ev_logged') == logged and q.v('ev_total') >= 6, 'the same event id is logged once per 500 ms')
-    q.fire(600)
-    ok(q.v('ev_logged') == logged + 1, 'and again after 500 ms')
-    ts = [e[3] for e in q.glog()]
-    ok(ts == sorted(ts), 'the log is in clock order')
-    names = [e[0] for e in q.glog()]
-    ok(names[:3] == [0x1001, 0x100b, 0x1002], ('release, its cancel, then the completion hook', [hex(n) for n in names[:4]]))
-    # a second photo: the eight events before its hook are kept with their distance to it
-    before = q.glog()
-    q.now += 2000
-    q.call('grmod_on_shot')
-    pre = q.pre()
-    ok(len(pre) == min(8, len(before)) and [x[0] for x in pre] == [e[0] for e in before[-8:]] and q.v('t_pre') == q.now, ('pre-hook snapshot', pre))
-    ok([e for e in q.glog() if e[0] == 0x1002][-1][3] == q.now, 'the hook entry carries the clock of the hook')
-    ok(q.v('hook') == 2, 'two hooks')
-    # transitions, attach and first copies are in the global log across photos
-    for _ in range(21):
-        q.tick()
-    q.call(0x53391b14, q.roots[0])
+    ok(q.s() == 0 and len(q.allocations) == n0, 'the release hook never allocates: with no block it does nothing')
+    evt(q, 0x199)
+    ok(q.s() != 0 and len(q.allocations) == n0 + 1 and q.allocations[-1][1] == q.L['sizeof_diag'] and q.v('ev_total') == 1, 'the first UI event allocates the block, once')
+    evt(q, 0x199, 10)
+    evt(q, 0x2222, 10)
+    ok(len(q.allocations) == n0 + 1 and q.v('ev_total') == 3 and q.v('ntab') == 2, 'later events allocate nothing')
     q.call('grmod_before_transition', cl.LV, 0x0800000c)
     q.call('grmod_after_transition')
-    codes = [e[0] for e in q.glog()]
-    ok(0x1005 in codes and 0x1006 in codes and 0x1009 in codes and 0x1003 in codes and 0x1004 in codes, ('attach, first copies, transitions are logged', [hex(c) for c in codes]))
-    q.call('grmod_cancel')
-    codes = [e[0] for e in q.glog()]
-    ok(codes[-2:] == [0x1001, 0x100a] or codes[-2:] == [0x1001, 0x100b], ('the release and its cancel are the last entries', [hex(c) for c in codes[-3:]]))
-    ts = [e[3] for e in q.glog()]
-    ok(ts == sorted(ts), 'clock order across photos')
-    q.canaries()
-    checks.append('global log: the first shutter release creates the block and starts it; the sixth hook logs UI event ids with the clock (once per id and 500 ms); the eight events before a hook are kept with their distance to it; '
-                  'release, hook, transitions, attach and first copies are logged across photos in clock order')
+    q.call('grmod_before_canvas_delete', q.roots[0])
+    q.call('grmod_timer_expired', 0, 0)
+    ok(q.v('trans_b') == 0 and q.v('trans_a') == 0 and q.cancels() == [0] * 10 and not q.children(q.roots[0]), 'the other hooks stay inert until the first photo')
+    base = len(q.allocations)
+    q.call('grmod_on_shot')
+    ok([s for _, s in q.allocations[base:]] == [248, 4] and len(q.timers()) == 1, 'a photo after the block exists allocates only the panel view and the child slot, and starts its timer')
+    for _ in range(21):
+        q.tick()
+    ok(q.cells() == [OK] * 12, 'the whole sequence works on a block made by the event hook')
+    # H2. an allocation failure in the event hook is remembered in a spare RAM word and never retried; the shot hook still allocates
+    q = new()
+    q.fail_at = {0}
+    q.alloc_count = 0
+    evt(q, 0x199)
+    ok(q.s() == 0 and q.get(0x5580438c) == 1, 'a failed allocation leaves no block and sets the flag word')
+    q.fail_at = set()
+    count = len(q.allocations)
+    for _ in range(5):
+        evt(q, 0x199, 10)
+    ok(q.s() == 0 and len(q.allocations) == count, 'and the event hook never tries again')
+    q.call('grmod_on_shot')
+    ok(q.s() != 0 and len(q.children(q.roots[0])) == 1, 'the shot hook allocates as before')
+    # H3. the distinct-id table: first and last time, count since the last RL, ids seen in the previous observation window marked
+    q = new()
+    q.call('grmod_on_shot')                                        # hook 1 at t0
+    t0 = q.now
+    for i in range(5):
+        evt(q, 0x199, 33)
+    evt(q, 0x2222, 100)
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x199][5] == 5 and rows[0x199][3] == t0 + 33 and rows[0x199][4] == t0 + 165 and rows[0x2222][5] == 1, ('counts, first and last', rows))
+    q.now += 400
+    q.call('grmod_cancel')                                         # RL: the release lane only
+    q.flush_release()
+    ok(q.v('rl_count') == 1 and q.v('rl_time') == q.now and q.tab()[0][5] != 0, 'UI task consumes the release and creates its boundary row')
+    trl = q.now
+    evt(q, 0x199, 33)                                              # the UI task syncs the table
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x199][5] == 2 and rows[0x199][3] == trl and rows[0x199][2] == 1, ('after the RL: reset, count 1, seen before', rows[0x199]))
+    ok(0x2222 not in rows and rows[0x1001][5] == 1 and rows[0x1001][3] == trl, 'new window reclaims silent rows; RL boundary is at time 0')
+    evt(q, 0x3333, 100)
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x3333][5] == 1 and rows[0x3333][2] == 0 and rows[0x3333][3] == trl + 133, 'a new id after the RL is not seen before')
+    # the completion hook of this photo: RL to HK, and a new window
+    q.now += 14000
+    q.call('grmod_on_shot')
+    ok(q.v('nrlhk') == 2 and q.get(q.s() + q.L['rlhk']) == q.now - trl, ('RL to HK', q.get(q.s() + q.L['rlhk'])))
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x3333][1] == 0 and rows[0x1002][1] == 0 and rows[0x1002][5] == 1, 'HK clears the window flags')
+    q.now += 500
+    q.call('grmod_on_shot')                                        # a second photo with no RL since the previous HK
+    ok(q.get(q.s() + q.L['rlhk']) == 0xffffffff, 'no RL since the previous hook: NO RL')
+    # H4. more distinct ids than rows: counted as overflow, nothing else disturbed
+    q = new()
+    q.call('grmod_on_shot')
+    for i in range(30):
+        evt(q, 0x4000 + i, 1)
+    ok(q.v('ntab') == 24 and q.get(q.s() + q.L['tab_ovf']) == 7, ('table full: the HK row and 23 ids, 7 overflowed', q.v('ntab'), q.get(q.s() + q.L['tab_ovf'])))
+    evt(q, 0x4001, 1)
+    ok({r[0]: r for r in q.tab()}[0x4001][5] == 2, 'existing rows keep counting when the table is full')
+    ok(q.v('ng') <= 400 and q.v('ev_logged') >= 1, 'the ring stays bounded')
+    # H5. count real trampoline instructions, stopping at the native continuation.
+    from check_diag_f_events import measure_cost
+    q = new()
+    q.call('grmod_on_shot')
+    cost = measure_cost(q)
+    checks.append('allocation: release callback publishes only a nonblocking mailbox, UI event allocates once, failure is remembered; distinct windows reclaim row capacity, and raw messages remain distinct from timer envelopes')
+    checks.append(f'steady-state event hook instruction counts, including trampoline and bounded fixture clock boundary: {cost}; not hardware CPU cycles or latency')
 
     return dict(checks=checks, assertions=counts['n'], diag_block_bytes=p.L['sizeof_diag'], loaded_state_bytes=p.L['sizeof_ld'],
-                cells=CELL_NAMES, hardware_tested=False)
+                cells=CELL_NAMES, instruction_costs=cost, hardware_tested=False)
 
 
 def main():
