@@ -17,7 +17,7 @@ from unicorn import arm_const as reg
 HERE = Path(__file__).resolve().parent
 SOUND = False
 import os
-OUT = HERE.parent/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
+OUT = HERE.parent/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
 BUILD = OUT/'build'
 BASE = 0x53000000
 STACK = 0x20010000
@@ -29,7 +29,7 @@ CASES = [(0x532d55f8, 'grmod_on_shot', 0x532288b0, 'tail'),
          (0x5316cb74, 'grmod_after_transition', 0x5316cb78, 'load'),
          (0x533918d0, 'grmod_before_canvas_delete', 0x533918d4, 'entry'),
          (0x53239818, 'grmod_cancel', 0x5323981c, 'entry')]
-EVENT = (0x53228ab4, 'grmod_on_event', 0x53228ab8) if os.environ.get('LOADED_VARIANT') == 'diagf' else None   # stage 1f: the sixth hook
+EVENT = (0x53228ab4, 'grmod_on_event', 0x53228ab8) if os.environ.get('LOADED_VARIANT') in ('diagf', 'diagg') else None   # stage 1f: the sixth hook
 if SOUND:
     CASES.append((0x53568d58, 'grmod_before_audio_shutdown', 0x53568d5c, 'entry'))
 

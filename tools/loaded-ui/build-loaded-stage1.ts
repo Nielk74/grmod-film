@@ -12,7 +12,7 @@ import {selfCheckGrown} from '../../core/src/fw/selfcheck';
 import {GR3_210} from '../../core/src/fw/gr3x/profile';
 import {branchWord} from '../../core/src/fw/aspect/arm';
 
-const here=dirname(fileURLToPath(import.meta.url)),variant=process.env.LOADED_VARIANT??'',diag=variant==='diag'||variant==='diage'||variant==='diagf',stage=variant==='diagf'?'1f':variant==='diage'?'1e':variant==='diag'?'1d':1,out=join(here,'out',variant==='diagf'?'firmware-loaded-stage1f-diagnostic':variant==='diage'?'firmware-loaded-stage1e-diagnostic':diag?'firmware-loaded-stage1d-diagnostic':'firmware-loaded-stage1'),build=join(out,'build');
+const here=dirname(fileURLToPath(import.meta.url)),variant=process.env.LOADED_VARIANT??'',diag=variant==='diag'||variant==='diage'||variant==='diagf'||variant==='diagg',stage=variant==='diagg'?'1g':variant==='diagf'?'1f':variant==='diage'?'1e':variant==='diag'?'1d':1,out=join(here,'out',variant==='diagg'?'firmware-loaded-stage1g-diagnostic':variant==='diagf'?'firmware-loaded-stage1f-diagnostic':variant==='diage'?'firmware-loaded-stage1e-diagnostic':diag?'firmware-loaded-stage1d-diagnostic':'firmware-loaded-stage1'),build=join(out,'build');
 const hash=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex');
 function check(condition:unknown,message:string):asserts condition{if(!condition)throw Error(`Loaded stage 1 on film pack: ${message}`);}
 const [input,output=join(out,'fwdc239b.bin')]=process.argv.slice(2);
@@ -38,7 +38,7 @@ const hooks=new Map([
   [0x5316cb74,{symbol:'grmod_hook_transition_after',link:false}],
   [0x533918d0,{symbol:'grmod_hook_canvas_delete',link:false}],
   [0x53239818,{symbol:'grmod_hook_release',link:false}],
-  ...(variant==='diagf'?[[0x53228ab4,{symbol:'grmod_hook_event',link:false}] as [number,{symbol:string,link:boolean}]]:[]),
+  ...(variant==='diagf'||variant==='diagg'?[[0x53228ab4,{symbol:'grmod_hook_event',link:false}] as [number,{symbol:string,link:boolean}]]:[]),
 ]);
 check(manifest.patches.length===hooks.size,`expected ${hooks.size} hooks`);
 const growth=Math.ceil((payload.length+256)/FRAME_SIZE)*FRAME_SIZE;
@@ -61,7 +61,7 @@ const view=new DataView(next.buffer);
 view.setUint32(rtos.offset-4,rtos.size+growth,true);
 const ranges=[{what:'RTOS length',offset:rtos.offset-4,length:4},{what:'Loaded stage 1 module',offset:rtosEnd,length:growth}];
 for(const patch of patches){next.set(Buffer.from(patch.replacement,'hex'),patch.offset);ranges.push({what:patch.reason,offset:patch.offset,length:4});}
-const marker=new TextEncoder().encode((variant==='diagf'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1F-DIAGNOSTIC-HARDWARE-UNTESTED\0':variant==='diage'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1E-DIAGNOSTIC-HARDWARE-UNTESTED\0':'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1-HARDWARE-UNTESTED\0'));
+const marker=new TextEncoder().encode((variant==='diagg'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1G-DIAGNOSTIC-HARDWARE-UNTESTED\0':variant==='diagf'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1F-DIAGNOSTIC-HARDWARE-UNTESTED\0':variant==='diage'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1E-DIAGNOSTIC-HARDWARE-UNTESTED\0':'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1-HARDWARE-UNTESTED\0'));
 next.set(marker,rtosEnd+growth-marker.length-4);
 view.setUint32(rtosEnd+growth-4,(-sum32(next))>>>0,true);
 check(sum32(next)===0,'decoded checksum repair failed');

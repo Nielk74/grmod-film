@@ -28,9 +28,9 @@ import link_firmware_filmpack as pack_tools  # noqa: E402  decode_container, rto
 
 import os  # noqa: E402
 VARIANT = os.environ.get('LOADED_VARIANT', '')
-DIAG = VARIANT in ('diag', 'diage', 'diagf')      # stage 1d / 1e: the diagnostic adapters, their own folder and marker
-OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic'}.get(VARIANT, 'firmware-loaded-stage1')
-ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c', 'diagf': 'camera_diag_f.c'}.get(VARIANT, 'camera_loaded.c')
+DIAG = VARIANT in ('diag', 'diage', 'diagf', 'diagg')      # stage 1d / 1e: the diagnostic adapters, their own folder and marker
+OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic'}.get(VARIANT, 'firmware-loaded-stage1')
+ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c', 'diagf': 'camera_diag_f.c', 'diagg': 'camera_diag_g.c'}.get(VARIANT, 'camera_loaded.c')
 BUILD = OUT/'build'
 EXPECTED_PACK_SHA256 = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
 sha = pack_tools.sha
@@ -120,7 +120,7 @@ def build(args):
         raise ValueError('Official reference RTOS changed')
     pack = pack_tools.rtos_of(pack_tools.decode_container(pack_file))
     patches, native = pack_tools.PATCHES, pack_tools.NATIVE_SYMBOLS
-    if VARIANT == 'diagf':       # a sixth hook, stage 1f only: the UI event dispatcher's first instruction
+    if VARIANT in ('diagf', 'diagg'):       # a sixth hook, stage 1f only: the UI event dispatcher's first instruction
         at = 0x53228AB4 - RTOS_BASE
         patches = [*patches, dict(address=0x53228AB4, expected=pack[at:at+4].hex(), symbol='grmod_hook_event', link=False,
                                   reason='Log every UI event the camera dispatches (stage 1f diagnostic)')]
@@ -157,7 +157,7 @@ SECTIONS {{
              '-Os', '-ffreestanding', '-fno-builtin', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables',
              '-fno-stack-protector', '-fno-common', '-fdata-sections', '-ffunction-sections', '-Wall', '-Wextra', '-Werror']
     sources = [HERE/'loaded.c', HERE/ADAPTER, NATIVE_TERMINAL/'camera_clock.c', NATIVE_TERMINAL/'hooks.S',
-               *([HERE/'hooks_f.S'] if VARIANT == 'diagf' else []), BUILD/'assets.S']
+               *([HERE/'hooks_f.S'] if VARIANT in ('diagf', 'diagg') else []), BUILD/'assets.S']
     objects = []
     for source in sources:
         target = BUILD/(source.stem+'.o')
@@ -174,7 +174,7 @@ SECTIONS {{
         raise ValueError('The audio latch must be a read-only word holding 1')
     headers = [HERE/'loaded.h', HERE/'loaded_data.h', HERE/'camera_loaded.h', NATIVE_TERMINAL/'camera_clock.h', BUILD/'loaded_slots.h']
     source_paths = [*sources[:-1], *headers, Path(__file__), LAB/'build-loaded-stage1.ts']
-    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage={'diag': '1d', 'diage': '1e', 'diagf': '1f'}.get(VARIANT, 1), hardwareTested=False,
+    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage={'diag': '1d', 'diage': '1e', 'diagf': '1f', 'diagg': '1g'}.get(VARIANT, 1), hardwareTested=False,
                     packSha256=sha(pack_file), packRtosSha256=sha(pack), packRtosBytes=len(pack), base=base,
                     payloadSha256=sha(payload), payloadBytes=len(payload), elfSha256=sha(elf_path.read_bytes()),
                     symbols=symbols, slots=names, patches=patches, stateWord=pack_tools.STATE_WORD, audioLatchReadOnly=latch,
