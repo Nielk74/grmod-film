@@ -17,7 +17,7 @@ from unicorn import arm_const as reg
 HERE = Path(__file__).resolve().parent
 SOUND = False
 import os
-OUT = HERE.parent/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
+OUT = HERE.parent/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
 BUILD = OUT/'build'
 BASE = 0x53000000
 STACK = 0x20010000
@@ -29,6 +29,7 @@ CASES = [(0x532d55f8, 'grmod_on_shot', 0x532288b0, 'tail'),
          (0x5316cb74, 'grmod_after_transition', 0x5316cb78, 'load'),
          (0x533918d0, 'grmod_before_canvas_delete', 0x533918d4, 'entry'),
          (0x53239818, 'grmod_cancel', 0x5323981c, 'entry')]
+EVENT = (0x53228ab4, 'grmod_on_event', 0x53228ab8) if os.environ.get('LOADED_VARIANT') == 'diagf' else None   # stage 1f: the sixth hook
 if SOUND:
     CASES.append((0x53568d58, 'grmod_before_audio_shutdown', 0x53568d5c, 'entry'))
 
@@ -41,7 +42,7 @@ def verify_pack_kept(image, pack, manifest, built, payload):
     """The whole point of this build: what the camera's saved settings need is untouched."""
     assert sha(pack) == manifest['packRtosSha256'], 'Wrong film pack RTOS'
     assert sha(image) == next(s['afterSha256'] for s in built['sections'] if s['name'] == 'RTOS'), 'Image differs from build report'
-    allowed = {case[0] for case in CASES}
+    allowed = {case[0] for case in CASES} | ({EVENT[0]} if EVENT else set())
     changed = {BASE+i for i in range(0, len(pack), 4) if image[i:i+4] != pack[i:i+4]}
     assert changed == allowed, ('Film pack bytes changed outside the hooks', sorted(hex(a) for a in changed-allowed))
     at = manifest['base']-BASE
@@ -145,6 +146,57 @@ def main():
                 assert cpu.reg_read(getattr(reg, 'UC_ARM_REG_R'+str(i))) == expected, (hex(address), flags, i)
             assert bytes(cpu.mem_read(STACK-128, 96)) == b'\xd3'*96
             assert bytes(cpu.mem_read(STACK, 128)) == b'\xd3'*128
+            results.append(dict(site=hex(address), callback=callback, flags=hex(flags), nativeContinuation=hex(destination)))
+
+    if EVENT:
+        # The UI event dispatcher hook: the callback gets (application, event); everything is preserved; the displaced `ldrh r2,[r1]` is replayed.
+        address, callback, destination = EVENT
+        patch = next(p for p in built['patches'] if p['address'] == address)
+        word, = struct.unpack_from('<I', image, address-BASE)
+        delta = word & 0x00ffffff
+        if delta & 0x00800000:
+            delta -= 0x01000000
+        assert address+8+delta*4 == symbols[patch['symbol']] and (word >> 28) == 14 and (word & 0x0f000000) == 0x0a000000
+        assert image[address-BASE+4:address-BASE+8] == pack[address-BASE+4:address-BASE+8], 'only the first word changes'
+        for flags in (0, 0xf80f0000, 0xa8050000, 0x500a0000):
+            cpu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+            cpu.mem_map(BASE, (len(image)+4095) & ~4095, UC_PROT_READ | UC_PROT_EXEC)
+            cpu.mem_write(BASE, image)
+            cpu.mem_map(0x10000000, 0x10000)
+            cpu.mem_map(0x20000000, 0x20000)
+            cpu.mem_write(OBJECT, struct.pack('<H', 0x016c))
+            cpu.mem_write(STACK-128, b'\xd3'*256)
+            initial = [0x1000+i*0x100 for i in range(13)]
+            initial[1] = OBJECT
+            for i, value in enumerate(initial):
+                cpu.reg_write(getattr(reg, 'UC_ARM_REG_R'+str(i)), value)
+            cpu.reg_write(reg.UC_ARM_REG_SP, STACK)
+            cpu.reg_write(reg.UC_ARM_REG_LR, STOP+4)
+            cpu.reg_write(reg.UC_ARM_REG_CPSR, flags | 0x13)
+            invoked, arrived = [], []
+
+            def hook(uc, at, size, _):
+                if at == symbols[callback]:
+                    assert uc.reg_read(reg.UC_ARM_REG_SP) == STACK-32
+                    assert uc.reg_read(reg.UC_ARM_REG_R1) == OBJECT
+                    invoked.append(uc.reg_read(reg.UC_ARM_REG_R0))
+                    ret = uc.reg_read(reg.UC_ARM_REG_LR)
+                    for i in (0, 1, 2, 3, 12):
+                        uc.reg_write(getattr(reg, 'UC_ARM_REG_R'+str(i)), 0xabcdef00+i)
+                    uc.reg_write(reg.UC_ARM_REG_CPSR, ((~flags) & MASK) | 0x13)
+                    uc.reg_write(reg.UC_ARM_REG_PC, ret)
+                elif at == destination:
+                    arrived.append(at)
+                    uc.emu_stop()
+            cpu.hook_add(UC_HOOK_CODE, hook)
+            cpu.emu_start(address, STOP+0x100, count=200)
+            assert invoked == [initial[0]] and arrived == [destination]
+            assert cpu.reg_read(reg.UC_ARM_REG_SP) == STACK and cpu.reg_read(reg.UC_ARM_REG_CPSR) & MASK == flags
+            assert cpu.reg_read(reg.UC_ARM_REG_LR) == STOP+4
+            for i, value in enumerate(initial):
+                want = 0x016c if i == 2 else value
+                assert cpu.reg_read(getattr(reg, 'UC_ARM_REG_R'+str(i))) == want, (hex(address), flags, i)
+            assert bytes(cpu.mem_read(STACK-128, 96)) == b'\xd3'*96 and bytes(cpu.mem_read(STACK, 128)) == b'\xd3'*128
             results.append(dict(site=hex(address), callback=callback, flags=hex(flags), nativeContinuation=hex(destination)))
 
     # The real start-up zero fill clears the animation's state word and stops at the heap header.
