@@ -199,6 +199,13 @@ def main():
             assert bytes(cpu.mem_read(STACK-128, 96)) == b'\xd3'*96 and bytes(cpu.mem_read(STACK, 128)) == b'\xd3'*128
             results.append(dict(site=hex(address), callback=callback, flags=hex(flags), nativeContinuation=hex(destination)))
 
+    if EVENT:
+        for name in ('grmod_alloc_flag', 'grmod_armed_flag'):
+            word = symbols[name]
+            assert 0x5580438c <= word < manifest['packZeroFillEnd'] and word % 4 == 0 and word != manifest['stateWord'], (name, hex(word))
+            assert not any(struct.pack('<I', word) == image[i:i+4] for i in range(0, len(pack), 4)), f'{name} is referenced by the film pack'
+        assert symbols['grmod_alloc_flag'] != symbols['grmod_armed_flag']
+
     # The real start-up zero fill clears the animation's state word and stops at the heap header.
     cpu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     cpu.mem_map(BASE, 0x1000, UC_PROT_READ | UC_PROT_EXEC)

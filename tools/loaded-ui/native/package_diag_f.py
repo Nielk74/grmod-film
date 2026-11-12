@@ -74,6 +74,8 @@ Expected if the analysis is right: in A the proof patterns (red 1 top, green 2 b
 
 ## Test card (keep the camera on, film the screen for the whole of each step)
 
+**0. After EVERY power-on, take one throwaway Standard photo first, wait for its panel to finish (about 20 s), and only then do the real test photos.** Reason: the log block is only allocated after the camera has certainly started, which the shutter release hook signals by setting a spare RAM word; the release that sets it cannot itself be logged, so the first photo after power-on has no RL row and page 12 shows `NO RL` for it. The throwaway photo absorbs that.
+
 1. Portra 400, ONE photo, no half press afterwards, touch nothing for 30 s. Film the screen for the whole 30 s and note the time of the shutter press. The panel appears when the completion hook fires (about 15 to 20 s for a film) and stays 21 s.
 2. Standard look, ONE photo, same: nothing touched for 30 s, filmed.
 3. Portra 400, a normal shot: half press, then full press (and release), then wait 30 s, filmed.
@@ -93,10 +95,10 @@ Pages 13 and 14 are the raw log: the last 8 global events with the time since th
 
 ## Who writes the log (the design note)
 
-- The block (a 170 KB buffer, the same kind as the panel's) is allocated by the UI-event hook on the first UI event it sees, once; if the allocation fails a spare RAM word is set and the hook never tries again. The shot hook still allocates it if it does not exist yet, as before.
-- The shutter release hook runs in a task that is not identified, so it never allocates. With no block it does nothing. With a block it writes only its own lane: an atomic increment of `rl_count`, the clock into `rl_time`, and one ring entry (the ring index is claimed with an atomic increment, so UI-task and release-hook entries cannot overwrite each other). It still cancels a running shot, as every stage has.
+- Nothing allocates until the camera is up and the user is shooting. The shutter release hook (which only runs when the shutter is used) sets an armed word in spare zero-filled RAM (`0x55804390`); that is its only new job, it allocates nothing. Until that word is set the UI-event hook does nothing at all (no clock read, no log, no allocation: a few instructions). The first UI event after it is set allocates the block (170 KB, the same kind as the panel's), once, on the UI task; if the allocation fails the failure word `0x5580438c` is set and the hook never tries again. The shot hook still allocates the block if it does not exist yet, as before.
+- The shutter release hook runs in a task that is not identified, so it never allocates. With no block it only sets the armed word. With a block it writes only its own lane: an atomic increment of `rl_count`, the clock into `rl_time`, and one ring entry (the ring index is claimed with an atomic increment, so UI-task and release-hook entries cannot overwrite each other). It still cancels a running shot, as every stage has.
 - The distinct-id table has one writer, the UI-task callbacks (event hook, transition hooks, shot hook); the release lane is folded into it on the next UI-task callback. The other hooks do nothing until the first photo.
-- Cost: measured in the emulator through the real trampoline and the real dispatcher, one dispatched event costs about 130 to 160 instructions (trampoline included, clock read included); the worst case, a full table and an id not in it, about 280 in the callback. Events that arrive faster than 500 ms for many different ids: the table counts all of them (24 rows, overflow counted), the ring takes one entry per id and 500 ms, per 16 id slots, and is bounded (160 entries, it wraps).
+- Cost: measured in the emulator through the real trampoline and the real dispatcher, one dispatched event costs 28 instructions before the log is armed (trampoline included, the callback returns at once) and about 130 to 160 after (clock read included); the worst case, a full table and an id not in it, about 280 in the callback. Events that arrive faster than 500 ms for many different ids: the table counts all of them (24 rows, overflow counted), the ring takes one entry per id and 500 ms, per 16 id slots, and is bounded (160 entries, it wraps).
 
 ## If it gets stuck
 
@@ -108,7 +110,7 @@ Passed in emulation on the delivered bytes ({adapter['assertions']} assertions i
 Layout reproduced and fixed with the original native layout pass; all earlier 1e scenarios (flows, failure cells, counters, reject codes, draw statistics) plus the global log, the release hook creating the block, the sixth hook and the pre-hook snapshot. Other checks: {', '.join(f'{k} {v}' for k, v in counts.items())}.
 Diag block {adapter['diag_block_bytes']:,} bytes.
 
-Not checked: any real camera; whether the camera lays the tree out itself after the hook (the panel works at the hook on the camera, which suggests it does); what the UI events mean (that is what this test collects); whether allocating the block from the UI-event hook at the first event is safe that early (the UI task has run by then, nothing else is touched at that moment); the shots-left counter.
+Not checked: any real camera; whether the camera lays the tree out itself after the hook (the panel works at the hook on the camera, which suggests it does); what the UI events mean (that is what this test collects); whether allocating the block at the first UI event after the first release is safe (the camera is up by then, nothing else is touched); the shots-left counter.
 """
     (OUT/'README.md').write_text(readme, encoding='utf-8', newline='\n')
     print(json.dumps(summary, indent=2))

@@ -578,13 +578,16 @@ def verify(data, segments, symbols):
         q.uc.mem_write(ev, struct.pack('<H', ident))
         q.call('grmod_on_event', ca.APP, ev)
 
-    # H1. the release hook never allocates; the first UI event allocates the block once, with nothing else touched
+    # H1. nothing runs before the release hook arms the log; the release only arms; the next UI event allocates the block once
     q = new()
     n0 = len(q.allocations)
+    for i in range(5):
+        evt(q, 0x199, 10)
+    ok(q.s() == 0 and len(q.allocations) == n0 and q.get(0x55804390) == 0 and q.get(0x5580438c) == 0, 'events before arming do nothing and allocate nothing')
     q.call('grmod_cancel')
-    ok(q.s() == 0 and len(q.allocations) == n0, 'the release hook never allocates: with no block it does nothing')
+    ok(q.get(0x55804390) == 1 and q.s() == 0 and len(q.allocations) == n0, 'the release hook only sets the armed word: no allocation, no block, nothing logged')
     evt(q, 0x199)
-    ok(q.s() != 0 and len(q.allocations) == n0 + 1 and q.allocations[-1][1] == q.L['sizeof_diag'] and q.v('ev_total') == 1, 'the first UI event allocates the block, once')
+    ok(q.s() != 0 and len(q.allocations) == n0 + 1 and q.allocations[-1][1] == q.L['sizeof_diag'] and q.v('ev_total') == 1, 'the first UI event after arming allocates the block, once')
     evt(q, 0x199, 10)
     evt(q, 0x2222, 10)
     ok(len(q.allocations) == n0 + 1 and q.v('ev_total') == 3 and q.v('ntab') == 2, 'later events allocate nothing')
@@ -596,15 +599,24 @@ def verify(data, segments, symbols):
     base = len(q.allocations)
     q.call('grmod_on_shot')
     ok([s for _, s in q.allocations[base:]] == [248, 4] and len(q.timers()) == 1, 'a photo after the block exists allocates only the panel view and the child slot, and starts its timer')
+    ok(q.v('rl_count') == 0 and q.get(q.s() + q.L['rlhk']) == 0xffffffff, 'the release that armed the log is not in it: the first photo shows NO RL')
     for _ in range(21):
         q.tick()
     ok(q.cells() == [OK] * 12, 'the whole sequence works on a block made by the event hook')
+    q.call('grmod_cancel')
+    ok(q.v('rl_count') == 1, 'a later release is logged')
+    # the first photo after power on with no UI event between the arming release and the hook: the shot hook allocates, NO RL as well
+    q = new()
+    q.call('grmod_cancel')
+    q.call('grmod_on_shot')
+    ok(q.s() != 0 and q.v('rl_count') == 0 and q.get(q.s() + q.L['rlhk']) == 0xffffffff and q.get(0x55804390) == 1, 'arming release then a photo: block made by the shot hook, NO RL')
     # H2. an allocation failure in the event hook is remembered in a spare RAM word and never retried; the shot hook still allocates
     q = new()
+    q.call('grmod_cancel')
     q.fail_at = {0}
     q.alloc_count = 0
     evt(q, 0x199)
-    ok(q.s() == 0 and q.get(0x5580438c) == 1, 'a failed allocation leaves no block and sets the flag word')
+    ok(q.s() == 0 and q.get(0x5580438c) == 1, 'a failed allocation leaves no block and sets the failure flag word')
     q.fail_at = set()
     count = len(q.allocations)
     for _ in range(5):
@@ -652,6 +664,22 @@ def verify(data, segments, symbols):
     ok(q.v('ng') <= 400 and q.v('ev_logged') >= 1, 'the ring stays bounded')
     # H5. the cost of one dispatched event, in instructions, measured through the real trampoline and the real dispatcher on the timer event
     from unicorn import UC_HOOK_CODE
+    qa = new()                                                      # before arming: no block, the callback returns at once
+    st = {'on': False, 'n': 0, 'out': []}
+
+    def pre_count(uc, at, size, user):
+        if at == qa.symbols['grmod_hook_event']:
+            st['on'] = True
+            st['n'] = 0
+        if st['on']:
+            st['n'] += 1
+            if at == 0x53228ab8:
+                st['on'] = False
+                st['out'].append(st['n'])
+    qa.uc.hook_add(UC_HOOK_CODE, pre_count)
+    qa.call(0x53228ab4, ca.APP, ca.EVENT)
+    pre_cost = st['out'][0] if st['out'] else None
+    ok(pre_cost is not None and pre_cost < 40 and qa.s() == 0, ('cost of an event before arming, trampoline and displaced instruction included', pre_cost))
     q = new()
     q.call('grmod_on_shot')
     state = {'on': False, 'n': 0}
@@ -671,7 +699,7 @@ def verify(data, segments, symbols):
     q.fire(33)                                                      # a new id: row created, ring written
     q.fire(33)                                                      # the same id within 500 ms: row found, ring not written
     q.fire(600)                                                     # after 500 ms: ring written again
-    cost = dict(new_id=samples[0], same_id_within_500ms=samples[1], same_id_after_500ms=samples[2])
+    cost = dict(before_arming=pre_cost, new_id=samples[0], same_id_within_500ms=samples[1], same_id_after_500ms=samples[2])
     worst = {'on': False, 'n': 0}
 
     def anyhook(uc, at, size, user):

@@ -92,6 +92,7 @@ typedef struct { uint16_t code;uint8_t ctype,aux;uint32_t t; } GLogE;
 /* The distinct-id table: one row per UI event id or synthetic kind. win: seen since the last HK; periodic: seen between the previous HK and the last RL. */
 typedef struct { uint16_t id;uint8_t win,periodic;uint32_t first,last,count; } TabRow;
 #define NTAB 24u
+extern volatile uint32_t grmod_armed_flag;   /* a spare zero-filled RAM word (0x55804390): set by the shutter release hook, so the camera is certainly up */
 extern volatile uint32_t grmod_alloc_flag;   /* a spare zero-filled RAM word (0x5580438c): 1 after the event hook failed to allocate the block */
 #define NGLOG 160u
 enum { GK_RELEASE=0x1001,GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,GK_D1,GK_D2,GK_D3,GK_D4,GK_PD,GK_CANCEL };
@@ -646,6 +647,7 @@ static void cancel_why(Diag *s,uint32_t reason){
  * (rl_count with an atomic increment, rl_time) and one ring entry (atomic index); the table is reset by the UI task. */
 void grmod_cancel(void){
     Diag *s=state();uint32_t now=0;
+    grmod_armed_flag=1;                          /* the only new job: from now on the UI-event hook may allocate the block (no allocation here) */
     if(!s)return;
     if(grmod_clock_ms(&now))s->rl_time=now;
     __atomic_fetch_add(&s->rl_count,1u,__ATOMIC_RELAXED);
@@ -784,8 +786,8 @@ void grmod_on_shot(void){
 void grmod_on_event(void *app,const uint16_t *event){
     Diag *s=state();uint32_t id,now=0,slot;
     (void)app;
-    if(!s){                                      /* the UI task: the first event allocates the block, once; a failure is remembered in a spare RAM word */
-        if(grmod_alloc_flag)return;
+    if(!s){                                      /* nothing at all (no clock, no log, no allocation) until the release hook has armed it */
+        if(!grmod_armed_flag||grmod_alloc_flag)return;   /* the UI task: the first event after arming allocates the block, once; a failure is remembered in a spare RAM word */
         s=alloc_block();
         if(!s){grmod_alloc_flag=1;return;}
     }
