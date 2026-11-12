@@ -11,7 +11,7 @@ import struct
 import sys
 from pathlib import Path
 
-os.environ['LOADED_VARIANT'] = 'stage2a'
+os.environ['LOADED_VARIANT'] = os.environ.get('LOADED_VARIANT') if os.environ.get('LOADED_VARIANT') in ('stage2a', 'stage2b') else 'stage2a'
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

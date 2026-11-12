@@ -29,10 +29,18 @@ import link_firmware_filmpack as pack_tools  # noqa: E402  decode_container, rto
 import os  # noqa: E402
 VARIANT = os.environ.get('LOADED_VARIANT', '')
 DIAG = VARIANT in ('diag', 'diage', 'diagf', 'diagg')      # stage 1d / 1e: the diagnostic adapters, their own folder and marker
-OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a'}.get(VARIANT, 'firmware-loaded-stage1')
-ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c', 'diagf': 'camera_diag_f.c', 'diagg': 'camera_diag_g.c', 'stage2a': 'camera_loaded2.c'}.get(VARIANT, 'camera_loaded.c')
+OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a', 'stage2b': 'firmware-loaded-stage2b-engine'}.get(VARIANT, 'firmware-loaded-stage1')
+ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c', 'diagf': 'camera_diag_f.c', 'diagg': 'camera_diag_g.c', 'stage2a': 'camera_loaded2.c', 'stage2b': 'camera_loaded2.c'}.get(VARIANT, 'camera_loaded.c')
 BUILD = OUT/'build'
 EXPECTED_PACK_SHA256 = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
+ENGINE_SHA256 = '3367220a951724908c06128cf70c39dc5587ff3ca6e52b2a417d071e5a558ebe'
+# The bases this linker accepts, each with the facts that were established for it (every other image is refused). A base is accepted only
+# when its hash is listed AND the checks in verify_base() hold on its bytes.
+BASES = {
+    EXPECTED_PACK_SHA256: dict(name='film pack v3 (2026-11-02)', rtosBytes=18478528, imageBytes=38408796),
+    ENGINE_SHA256: dict(name='colour engine, five LUT tables (2026-11-09)', rtosBytes=19559872, imageBytes=39490228),
+}
+RESERVED_RAM = (0x558043b8, 0x558043bc, 0x55804390, 0x5580438c)   # state word, latch word (unused), event count word, allocation-failure word
 sha = pack_tools.sha
 RTOS_BASE = pack_tools.RTOS_BASE
 FIRST_FILM_LOOK = 64
@@ -110,22 +118,40 @@ def loaded_films():
     return json.loads(out.stdout)
 
 
+def verify_base(pack, stock, patches, facts):
+    """The facts a base must hold for our hooks, state word and spare words to be safe on it. Returns what was established (for the manifest)."""
+    if len(pack) != facts['rtosBytes']:
+        raise ValueError(f"Base RTOS is {len(pack)} bytes, expected {facts['rtosBytes']}")
+    pack_tools.PACK_RTOS_BYTES = facts['rtosBytes']
+    pack_tools.check_pack(pack, stock, patches)            # trailer, zero fill end, identity, hook sites unpatched, services unchanged, free RAM words unused
+    for patch in patches:                                  # each of our hook sites must be byte-identical to the stock firmware's bytes
+        at = patch['address'] - RTOS_BASE
+        if pack[at:at+4] != stock[at:at+4] or pack[at:at+4].hex() != patch['expected']:
+            raise ValueError('Base changes our hook site ' + hex(patch['address']))
+    refs = pack_tools.ram_word_references(pack, RESERVED_RAM)
+    if refs:
+        raise ValueError('Base uses a RAM word reserved for this module: ' + ', '.join(refs))
+    return dict(hookSitesIdenticalToStock=[hex(p['address']) for p in patches], reservedRamUnreferenced=[hex(w) for w in RESERVED_RAM],
+                zeroFillEnd=hex(pack_tools.PACK_ZERO_FILL_END), rtosBytes=len(pack), rtosEnd=hex(RTOS_BASE + len(pack)))
+
+
 def build(args):
     BUILD.mkdir(parents=True, exist_ok=True)
     pack_file = args.pack.read_bytes()
-    if sha(pack_file) != args.pack_sha256:
-        raise ValueError(f'Refusing this base: SHA-256 {sha(pack_file)} is not the expected film pack {args.pack_sha256}')
+    facts = BASES.get(sha(pack_file))
+    if facts is None or (args.pack_sha256 and sha(pack_file) != args.pack_sha256):
+        raise ValueError(f'Refusing this base: SHA-256 {sha(pack_file)} is not one of the accepted bases: ' + ', '.join(f"{k} ({v['name']})" for k, v in BASES.items()))
     stock = args.stock_rtos.read_bytes()
     if sha(stock) != official.RTOS_HASH:
         raise ValueError('Official reference RTOS changed')
     pack = pack_tools.rtos_of(pack_tools.decode_container(pack_file))
     patches, native = pack_tools.PATCHES, pack_tools.NATIVE_SYMBOLS
-    if VARIANT in ('diagf', 'diagg', 'stage2a'):       # a sixth hook, stage 1f only: the UI event dispatcher's first instruction
+    if VARIANT in ('diagf', 'diagg', 'stage2a', 'stage2b'):       # a sixth hook, stage 1f only: the UI event dispatcher's first instruction
         at = 0x53228AB4 - RTOS_BASE
         patches = [*patches, dict(address=0x53228AB4, expected=pack[at:at+4].hex(), symbol='grmod_hook_event', link=False,
                                   reason='Log every UI event the camera dispatches (stage 1f diagnostic)')]
         native = {**native, 'native_event_resume': 0x53228AB8, 'grmod_alloc_flag': 0x5580438C, 'grmod_armed_flag': 0x55804390}
-    pack_tools.check_pack(pack, stock, patches)
+    base_facts = verify_base(pack, stock, patches, facts)
     base = pack_tools.RTOS_BASE + len(pack)
     # The slot-to-film table comes from the names in THIS image; a slot without a Loaded film refuses the base.
     names = read_slot_names(pack)
@@ -157,7 +183,7 @@ SECTIONS {{
              '-Os', '-ffreestanding', '-fno-builtin', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables',
              '-fno-stack-protector', '-fno-common', '-fdata-sections', '-ffunction-sections', '-Wall', '-Wextra', '-Werror']
     sources = [HERE/'loaded.c', HERE/ADAPTER, NATIVE_TERMINAL/'camera_clock.c', NATIVE_TERMINAL/'hooks.S',
-               *([HERE/'hooks_f.S'] if VARIANT in ('diagf', 'diagg', 'stage2a') else []), BUILD/'assets.S']
+               *([HERE/'hooks_f.S'] if VARIANT in ('diagf', 'diagg', 'stage2a', 'stage2b') else []), BUILD/'assets.S']
     objects = []
     for source in sources:
         target = BUILD/(source.stem+'.o')
@@ -174,9 +200,10 @@ SECTIONS {{
         raise ValueError('The audio latch must be a read-only word holding 1')
     headers = [HERE/'loaded.h', HERE/'loaded_data.h', HERE/'camera_loaded.h', NATIVE_TERMINAL/'camera_clock.h', BUILD/'loaded_slots.h']
     source_paths = [*sources[:-1], *headers, Path(__file__), LAB/'build-loaded-stage1.ts']
-    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage={'diag': '1d', 'diage': '1e', 'diagf': '1f', 'diagg': '1g', 'stage2a': '2a'}.get(VARIANT, 1), hardwareTested=False,
+    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage={'diag': '1d', 'diage': '1e', 'diagf': '1f', 'diagg': '1g', 'stage2a': '2a', 'stage2b': '2b'}.get(VARIANT, 1), hardwareTested=False,
                     packSha256=sha(pack_file), packRtosSha256=sha(pack), packRtosBytes=len(pack), base=base,
                     payloadSha256=sha(payload), payloadBytes=len(payload), elfSha256=sha(elf_path.read_bytes()),
+                    baseName=facts['name'], baseFacts=base_facts,
                     symbols=symbols, slots=names, patches=patches, stateWord=pack_tools.STATE_WORD, audioLatchReadOnly=latch,
                     packZeroFillEnd=pack_tools.PACK_ZERO_FILL_END,
                     sourceHashes={p.relative_to(ROOT).as_posix(): sha(p.read_bytes()) for p in source_paths})
@@ -187,9 +214,9 @@ SECTIONS {{
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pack', type=Path, default=MAIN/'scratch'/'film-mtf-all-films-firmware-2026-11-02'/'fwdc239b.bin',
-                        help='the film pack fwdc239b.bin to build on (read only)')
-    parser.add_argument('--pack-sha256', default=EXPECTED_PACK_SHA256, help='the SHA-256 the base must have')
+    parser.add_argument('--pack', type=Path, default=(MAIN/'scratch'/'colour-engine'/'firmware-test'/'fwdc239b.bin' if VARIANT == 'stage2b' else MAIN/'scratch'/'film-mtf-all-films-firmware-2026-11-02'/'fwdc239b.bin'),
+                        help='the base fwdc239b.bin to build on (read only); its SHA-256 must be in BASES')
+    parser.add_argument('--pack-sha256', default=None, help='optionally, the SHA-256 the base must have')
     parser.add_argument('--stock-rtos', type=Path, default=MAIN/'scratch'/'video-firmware-high-rate-2026-11-01'/'original-rtos.bin')
     parser.add_argument('--clang', default=shutil.which('clang') or r'C:\Program Files\LLVM\bin\clang.exe')
     parser.add_argument('--lld', default=shutil.which('ld.lld') or r'C:\Program Files\LLVM\bin\ld.lld.exe')
