@@ -21,7 +21,7 @@ sys.path.insert(0, str(LAB.parent/'shot-animation'/'native'))
 import check_adapter as ca  # noqa: E402
 
 import os
-OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a', 'stage2b': 'firmware-loaded-stage2b-engine'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
+OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a', 'stage2b': 'firmware-loaded-stage2b-engine', 'stage3aengine': 'firmware-loaded-stage3a-engine', 'stage3afilmpack': 'firmware-loaded-stage3a-filmpack'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
 BUILD = OUT/'build'
 LV, QV, OTHER, SERVICE = ca.LV, ca.QV, ca.OTHER, ca.SERVICE
 RECORD = ca.RECORD

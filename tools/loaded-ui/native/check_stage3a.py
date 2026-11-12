@@ -9,6 +9,7 @@ import json
 import os
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 VARIANTS = ('stage3aengine', 'stage3afilmpack')
@@ -23,6 +24,7 @@ VIEWS = cl.VIEWS
 LAYOUT = ['views', 'pixels', 'shots', 'pending_roll', 'engine', 'sizeof', 'pend', 'npend', 'last_accept', 'accepts', 'ignored', 'fallbacks', 'consumed', 'dropped',
           'running', 'params', 'shown', 'sliding', 'nframe', 'roll', 'film', 'shows', 'hides', 'film_changes', 'attach_failures']
 ARMED, FAILED = 0x55804390, 0x5580438c
+zlib_crc = zlib.crc32
 TOP, BOTTOM, COUNTER, TAB = 0, 1, 2, 3
 
 
@@ -116,11 +118,19 @@ def verify(data, segments, symbols):
     rects = [struct.unpack('<4i', p.uc.mem_read(v + 0x30, 16)) for v in p.adapter_views()]
     ok(rects == VIEWS, ('on a clean root the views are laid out', rects))
     vis = bytes(p.uc.mem_read(ca.DEST + 32, 736 * 480 * 4))
-    cov = lambda x, y, w, h: any(vis[((y + yy) * 736 + x + xx) * 4 + 3] != 0xa5 for yy in range(0, h, 2) for xx in range(0, w, 2))
-    ok(cov(*VIEWS[TAB]) and cov(*VIEWS[COUNTER]) and not cov(*VIEWS[TOP]) and not cov(*VIEWS[BOTTOM]), 'only the tab and the counter reach the screen')
+    for name, i in (('tab', TAB), ('counter', COUNTER)):
+        x, y, w, h = VIEWS[i]
+        buf = p.get(p.state() + p.layout[1] + 4 * i)
+        px = bytes(p.uc.mem_read(buf, w * h * 4))
+        opaque = [k for k in range(w * h) if px[4 * k + 3] != 0]
+        ok(len(opaque) > 500, f'the {name} buffer has content')
+        same = sum(1 for k in opaque if vis[((y + k // w) * 736 + x + k % w) * 4:((y + k // w) * 736 + x + k % w) * 4 + 4] == px[4 * k:4 * k + 4])
+        ok(same == len(opaque), f'every opaque pixel of the {name} is on the screen, at its place ({same} of {len(opaque)})')
+    empty = zlib_crc(bytes(720 * 44 * 4))
+    ok(p.hashes()[TOP] == empty and p.hashes()[BOTTOM] == empty, 'the strips are empty')
     p.canaries()
     checks.append('the idle allocation shows the tab and counter in the shooting live view: the slide-in (six frames) and the steady state equal the JS reference, then no timer; ten seconds idle and a half press change nothing; '
-                  'on a clean root the views are laid out and only the tab and counter draw')
+                  'on a clean root the views are laid out and the tab and counter pixels land on the screen, the strips are empty')
 
     # ---- 2. a photo: the moment starts on 0x013E with the furniture showing, the counter rolls, then they stay with the new number
     p = ready()
