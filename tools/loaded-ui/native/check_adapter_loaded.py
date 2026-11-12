@@ -204,6 +204,18 @@ def verify(data, segments, symbols):
     ok(not p.children(root) and not p.timers(), 'Everything must be gone after the peek window (about 2.0 s)')
     checks.append(f'{len(times)} frames across the 1500 ms shot equal the JS reference (peek clock at the shot); 4 linger frames after the deadline equal the JS reference; the views and the timer are gone at 2.0 s')
 
+    # ---- 2b. a clean root (the camera has just painted): the new views must be laid out by the original layout pass (their absolute rectangles)
+    p2 = new()
+    r2 = p2.roots[0]
+    p2.call(0x53391b14, r2)                              # a paint pass: layout runs and the root's flags are cleared
+    ok(tuple(p2.uc.mem_read(r2 + 0x9c, 2)) == (0, 0), 'the root is clean')
+    p2.call('grmod_on_shot')                             # the shot attaches brand new views to the clean root
+    p2.call(0x53391b14, r2)
+    for i, (x, y, w, h) in enumerate(VIEWS):
+        got = struct.unpack('<4i', p2.uc.mem_read(p2.adapter_views()[i] + 0x30, 16))
+        ok(got == (x, y, w, h), f'a view attached to a clean root must be laid out: {NAMES[i]} {got}')
+    checks.append('views attached to a root that has just been painted get their absolute rectangles from the original layout pass (the root is asked to lay out its new children)')
+
     # ---- 3. real Canvas drawing through the original native copier; canaries; the draw checks per view
     p.set_shots(0)
     p.now = 5000

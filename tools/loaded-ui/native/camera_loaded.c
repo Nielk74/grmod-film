@@ -185,6 +185,10 @@ static int attach(Adapter *s,void *root,void *controller){
     for(i=0;i<NV;i++){view_add(root,s->views[i]);}
     s->root=root;s->controller=controller;
     for(i=0;i<NV;i++)view_visible(s->views[i],1);
+    /* A new child is only laid out (its absolute rectangle computed) if its ancestors are flagged "a child needs layout". A fresh view
+     * already carries its own flag, so view_visible does not propagate it, and a clean root never visits it: its rectangle stays 0,0,0,0 and
+     * every draw is rejected. Ask the root explicitly, through its own vtable slot 0x20 (0x533ab3cc, the same request view_visible makes). */
+    ((two_fn)(uintptr_t)(*(uint32_t **)root)[8])(root,s->views[0]);
     view_invalidate(root);return 1;
 }
 
