@@ -17,7 +17,7 @@ from unicorn import arm_const as reg
 HERE = Path(__file__).resolve().parent
 SOUND = False
 import os
-OUT = HERE.parent/'out'/('firmware-loaded-stage1d-diagnostic' if os.environ.get('LOADED_VARIANT') == 'diag' else 'firmware-loaded-stage1')
+OUT = HERE.parent/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
 BUILD = OUT/'build'
 BASE = 0x53000000
 STACK = 0x20010000

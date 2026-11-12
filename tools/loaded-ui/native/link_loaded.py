@@ -27,9 +27,10 @@ import link_firmware as official  # noqa: E402  SERVICES, PATCHES, NATIVE_SYMBOL
 import link_firmware_filmpack as pack_tools  # noqa: E402  decode_container, rtos_of, check_pack, flatten
 
 import os  # noqa: E402
-DIAG = os.environ.get('LOADED_VARIANT') == 'diag'      # stage 1d: the diagnostic adapter, its own folder and marker
-OUT = LAB/'out'/('firmware-loaded-stage1d-diagnostic' if DIAG else 'firmware-loaded-stage1')
-ADAPTER = 'camera_diag.c' if DIAG else 'camera_loaded.c'
+VARIANT = os.environ.get('LOADED_VARIANT', '')
+DIAG = VARIANT in ('diag', 'diage')      # stage 1d / 1e: the diagnostic adapters, their own folder and marker
+OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic'}.get(VARIANT, 'firmware-loaded-stage1')
+ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c'}.get(VARIANT, 'camera_loaded.c')
 BUILD = OUT/'build'
 EXPECTED_PACK_SHA256 = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
 sha = pack_tools.sha
@@ -167,7 +168,7 @@ SECTIONS {{
         raise ValueError('The audio latch must be a read-only word holding 1')
     headers = [HERE/'loaded.h', HERE/'loaded_data.h', HERE/'camera_loaded.h', NATIVE_TERMINAL/'camera_clock.h', BUILD/'loaded_slots.h']
     source_paths = [*sources[:-1], *headers, Path(__file__), LAB/'build-loaded-stage1.ts']
-    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage='1d' if DIAG else 1, hardwareTested=False,
+    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage={'diag': '1d', 'diage': '1e'}.get(VARIANT, 1), hardwareTested=False,
                     packSha256=sha(pack_file), packRtosSha256=sha(pack), packRtosBytes=len(pack), base=base,
                     payloadSha256=sha(payload), payloadBytes=len(payload), elfSha256=sha(elf_path.read_bytes()),
                     symbols=symbols, slots=names, patches=patches, stateWord=pack_tools.STATE_WORD, audioLatchReadOnly=latch,

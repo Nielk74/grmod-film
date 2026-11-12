@@ -12,7 +12,7 @@ import {selfCheckGrown} from '../../core/src/fw/selfcheck';
 import {GR3_210} from '../../core/src/fw/gr3x/profile';
 import {branchWord} from '../../core/src/fw/aspect/arm';
 
-const here=dirname(fileURLToPath(import.meta.url)),diag=process.env.LOADED_VARIANT==='diag',out=join(here,'out',diag?'firmware-loaded-stage1d-diagnostic':'firmware-loaded-stage1'),build=join(out,'build');
+const here=dirname(fileURLToPath(import.meta.url)),variant=process.env.LOADED_VARIANT??'',diag=variant==='diag'||variant==='diage',stage=variant==='diage'?'1e':variant==='diag'?'1d':1,out=join(here,'out',variant==='diage'?'firmware-loaded-stage1e-diagnostic':diag?'firmware-loaded-stage1d-diagnostic':'firmware-loaded-stage1'),build=join(out,'build');
 const hash=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex');
 function check(condition:unknown,message:string):asserts condition{if(!condition)throw Error(`Loaded stage 1 on film pack: ${message}`);}
 const [input,output=join(out,'fwdc239b.bin')]=process.argv.slice(2);
@@ -21,7 +21,7 @@ const pack=new Uint8Array(readFileSync(resolve(input)));
 const manifest=JSON.parse(readFileSync(join(build,'payload-manifest.json'),'utf8'));
 const payload=new Uint8Array(readFileSync(join(build,'loaded-payload.bin')));
 check(hash(pack)===manifest.packSha256,'this is not the film pack the payload was linked against');
-check(manifest.schema===1&&manifest.camera==='GR III'&&manifest.silent===true&&manifest.stage===(diag?'1d':1)&&manifest.hardwareTested===false,'manifest identity');
+check(manifest.schema===1&&manifest.camera==='GR III'&&manifest.silent===true&&manifest.stage===stage&&manifest.hardwareTested===false,'manifest identity');
 check(hash(payload)===manifest.payloadSha256&&payload.length===manifest.payloadBytes,'linked payload changed');
 for(const [path,expected] of Object.entries(manifest.sourceHashes)){
   check(hash(new Uint8Array(readFileSync(resolve(here,'..','..',path))))===expected,`source changed after link:${path}`);
@@ -60,7 +60,7 @@ const view=new DataView(next.buffer);
 view.setUint32(rtos.offset-4,rtos.size+growth,true);
 const ranges=[{what:'RTOS length',offset:rtos.offset-4,length:4},{what:'Loaded stage 1 module',offset:rtosEnd,length:growth}];
 for(const patch of patches){next.set(Buffer.from(patch.replacement,'hex'),patch.offset);ranges.push({what:patch.reason,offset:patch.offset,length:4});}
-const marker=new TextEncoder().encode('GR3-HDF-210-ADJ9-T10-LOADED-STAGE1-HARDWARE-UNTESTED\0');
+const marker=new TextEncoder().encode((variant==='diage'?'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1E-DIAGNOSTIC-HARDWARE-UNTESTED\0':'GR3-HDF-210-ADJ9-T10-LOADED-STAGE1-HARDWARE-UNTESTED\0'));
 next.set(marker,rtosEnd+growth-marker.length-4);
 view.setUint32(rtosEnd+growth-4,(-sum32(next))>>>0,true);
 check(sum32(next)===0,'decoded checksum repair failed');
@@ -77,7 +77,7 @@ const sectionReport=sections.map((section,i)=>{
   check(section.name==='RTOS'||beforeHash===afterHash,`film pack section changed:${section.name}`);
   return{name:section.name,beforeBytes:sectionData(decoded,section).length,afterBytes:sectionData(next,other).length,beforeSha256:beforeHash,afterSha256:afterHash};
 });
-const report={schema:1,camera:'GR III',baseVersion:'2.10',filename:'fwdc239b.bin',silent:true,stage:diag?'1d':1,
+const report={schema:1,camera:'GR III',baseVersion:'2.10',filename:'fwdc239b.bin',silent:true,stage,
   packSha256:hash(pack),outputSha256:hash(built.out),outputBytes:built.out.length,decodedBytes:next.length,
   rtosGrowth:growth,payloadBytes:payload.length,rtosRuntimeEnd:base+growth,slots:manifest.slots,hardwareTested:false,versionRaised:false,
   checks,patches,sections:sectionReport};
