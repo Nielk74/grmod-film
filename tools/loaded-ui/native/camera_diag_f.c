@@ -53,10 +53,10 @@ typedef struct { uint32_t *vtable; } Listener;
 
 #define DIAG_W 240u
 #define DIAG_H 176u
-#define DIAG_MS 15000u             /* ten pages of 1.5 s */
-#define DIAG_TICKS 455u            /* the same in 33 ms ticks, used when the clock cannot be read */
+#define DIAG_MS 21000u             /* fourteen pages of 1.5 s */
+#define DIAG_TICKS 637u            /* the same in 33 ms ticks, used when the clock cannot be read */
 #define PAGE_MS 1500u
-#define NPAGES 10u
+#define NPAGES 14u
 #define PROOF_MS 1000u
 #define PROOF_TICKS 31u
 #define USERDATA_MODEL 0x55063f30u
@@ -89,6 +89,10 @@ static const char *const REASON[NREASON]={"CLOCK","ROOT","FILM","CREATE","ATTACH
 typedef struct { uint32_t calls[3],copied[3],rej[3],parent_ok;int32_t abs[4]; } VStat;
 typedef struct { uint8_t code,ctype,aux,pad;uint32_t ms; } LogE;
 typedef struct { uint16_t code;uint8_t ctype,aux;uint32_t t; } GLogE;
+/* The distinct-id table: one row per UI event id or synthetic kind. win: seen since the last HK; periodic: seen between the previous HK and the last RL. */
+typedef struct { uint16_t id;uint8_t win,periodic;uint32_t first,last,count; } TabRow;
+#define NTAB 24u
+extern volatile uint32_t grmod_alloc_flag;   /* a spare zero-filled RAM word (0x5580438c): 1 after the event hook failed to allocate the block */
 #define NGLOG 160u
 enum { GK_RELEASE=0x1001,GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,GK_D1,GK_D2,GK_D3,GK_D4,GK_PD,GK_CANCEL };
 static const char *const GNAME[11]={"RL","HK","TB","TA","AT","D1","D2","D3","D4","PD","XC"};
@@ -113,6 +117,7 @@ typedef struct {
     LogE log[NLOG];uint32_t nlog;
     GLogE glog[NGLOG];uint32_t ng,ev_total,ev_logged;
     uint16_t ev_id[16];uint32_t ev_t[16];
+    TabRow tab[NTAB];uint32_t ntab,tab_ovf,rl_count,rl_seen,rl_time,t_rl,hk_rl_count,nrlhk,rlhk[3];
     GLogE pre[8];uint32_t npre,t_pre;
     uint32_t pixels[DIAG_W*DIAG_H];            /* the proven size: Terminal's pixel array was 168,960 bytes */
 } Diag;
@@ -131,7 +136,9 @@ const uint32_t grmod_layout[]={__builtin_offsetof(Diag,ld),__builtin_offsetof(Di
     /* 40 */ sizeof(LogE),__builtin_offsetof(Diag,ld_copies_shot),__builtin_offsetof(Diag,last_cancel_hook),__builtin_offsetof(Diag,reattach),
     /* 44 */ __builtin_offsetof(Diag,proof_seen),__builtin_offsetof(Diag,tk_panel),__builtin_offsetof(Diag,tk_ld),__builtin_offsetof(Diag,first_copy_mask),
     /* 48 */ __builtin_offsetof(Diag,glog),__builtin_offsetof(Diag,ng),sizeof(GLogE),__builtin_offsetof(Diag,pre),__builtin_offsetof(Diag,npre),
-    __builtin_offsetof(Diag,t_pre),__builtin_offsetof(Diag,ev_total),__builtin_offsetof(Diag,ev_logged)};
+    __builtin_offsetof(Diag,t_pre),__builtin_offsetof(Diag,ev_total),__builtin_offsetof(Diag,ev_logged),
+    /* 56 */ __builtin_offsetof(Diag,tab),sizeof(TabRow),__builtin_offsetof(Diag,ntab),__builtin_offsetof(Diag,tab_ovf),__builtin_offsetof(Diag,rl_count),
+    __builtin_offsetof(Diag,rl_time),__builtin_offsetof(Diag,t_rl),__builtin_offsetof(Diag,rlhk),__builtin_offsetof(Diag,nrlhk),__builtin_offsetof(Diag,hk_rl_count)};
 
 static uint32_t rd32(const void *p){return *(const uint32_t *)p;}
 static void *ptr(const void *p,uint32_t off){return *(void *const *)((const uint8_t *)p+off);}
@@ -158,7 +165,32 @@ static uint32_t cur_ctype(void){
 static void glog(Diag *s,uint32_t code,uint32_t ctype,uint32_t aux){
     uint32_t now=0;GLogE *e;
     if(!grmod_clock_ms(&now))now=0;
-    e=&s->glog[s->ng%NGLOG];e->code=(uint16_t)code;e->ctype=(uint8_t)ctype;e->aux=(uint8_t)aux;e->t=now;s->ng++;
+    e=&s->glog[__atomic_fetch_add(&s->ng,1u,__ATOMIC_RELAXED)%NGLOG];   /* the index is claimed atomically: the release hook may write too */
+    e->code=(uint16_t)code;e->ctype=(uint8_t)ctype;e->aux=(uint8_t)aux;e->t=now;
+}
+/* The distinct-id table. Writers: the UI-task callbacks only (event hook, transition hooks, shot hook). The release hook does not touch it:
+ * it only bumps rl_count and stores rl_time, and the table is reset by tab_sync() on the next UI-task callback. */
+static void tab_hit(Diag *s,uint32_t id,uint32_t now);
+static void tab_boundary(Diag *s,uint32_t id,uint32_t now){      /* RL and HK delimit the windows, so they are never marked as periodic themselves */
+    uint32_t i;
+    tab_hit(s,id,now);
+    for(i=0;i<s->ntab;i++)if(s->tab[i].id==id)s->tab[i].win=0;
+}
+static void tab_sync(Diag *s){
+    uint32_t i,n=s->rl_count;
+    if(s->rl_seen==n)return;
+    s->rl_seen=n;s->t_rl=s->rl_time;
+    for(i=0;i<s->ntab;i++){s->tab[i].periodic=s->tab[i].win;s->tab[i].first=s->tab[i].last=s->tab[i].count=0;}
+    tab_boundary(s,GK_RELEASE,s->t_rl);
+}
+static void tab_hit(Diag *s,uint32_t id,uint32_t now){
+    uint32_t i;TabRow *r=0;
+    for(i=0;i<s->ntab;i++)if(s->tab[i].id==id){r=&s->tab[i];break;}
+    if(!r){
+        if(s->ntab>=NTAB){s->tab_ovf++;return;}
+        r=&s->tab[s->ntab++];r->id=(uint16_t)id;
+    }
+    r->win=1;if(!r->count)r->first=now;r->count++;r->last=now;
 }
 static void log_ev(Diag *s,uint32_t code,uint32_t ctype,uint32_t aux){
     static const uint16_t GMAP[NLOGCODE]={GK_HOOK,GK_BEFORE,GK_AFTER,GK_ATT,0,0,0,0,GK_D1,GK_D2,GK_D3,GK_D4,GK_PD,GK_CANCEL,0,0,0};
@@ -316,6 +348,41 @@ static void page_pre(Diag *d){
         row(d,1u+i,l);
     }
 }
+static void fmt_s(char *l,uint32_t ms){
+    if(ms>=99900u){cat(l,"99+");return;}
+    cat_dec(l,ms/1000u);cat(l,".");cat_dec(l,(ms%1000u)/100u);
+}
+static void page_tab(Diag *d,uint32_t part){
+    uint8_t idx[NTAB];uint32_t n=0,i,j;char l[24];
+    for(i=0;i<d->ntab;i++)if(d->tab[i].count)idx[n++]=(uint8_t)i;
+    for(i=1;i<n;i++){                              /* insertion sort by the time of the first occurrence after the last RL */
+        uint8_t v=idx[i];
+        for(j=i;j>0&&d->tab[idx[j-1]].first-d->t_rl>d->tab[v].first-d->t_rl;j--)idx[j]=idx[j-1];
+        idx[j]=v;
+    }
+    l[0]=0;cat(l,"ID  FIRST LAST N !");cat(l," ");cat_dec(l,part+1u);cat(l,"/3");row(d,0,l);
+    for(i=0;i<8u&&part*8u+i<n;i++){
+        const TabRow *r=&d->tab[idx[part*8u+i]];
+        l[0]=0;
+        if(r->id>=GK_RELEASE&&r->id<=GK_AFTER)cat(l,GNAME[r->id-GK_RELEASE]);else cat_hex4(l,r->id);
+        pad(l,5);fmt_s(l,r->first-d->t_rl);pad(l,10);fmt_s(l,r->last-d->t_rl);pad(l,15);cat_dec(l,r->count>999u?999u:r->count);
+        if(r->periodic)cat(l," !");
+        row(d,1u+i,l);
+    }
+    l[0]=0;cat(l,"ROWS ");cat_dec(l,d->ntab);cat(l," OVF ");cat_dec(l,d->tab_ovf);cat(l," RL ");cat_dec(l,d->rl_count);row(d,10,l);
+}
+static void page_rlhk(Diag *d){
+    char l[24];uint32_t i;
+    row(d,0,"RL TO HK, LAST 3");
+    for(i=0;i<3u&&i<d->nrlhk;i++){
+        l[0]=0;cat_dec(l,d->nrlhk-i);cat(l," ");
+        if(d->rlhk[i]==0xffffffffu)cat(l,"NO RL");else{fmt_s(l,d->rlhk[i]);cat(l," S");}
+        row(d,1u+i,l);
+    }
+    l[0]=0;cat(l,"RL ");cat_dec(l,d->rl_count);cat(l," HK ");cat_dec(l,d->hook);row(d,5,l);
+    row(d,7,"SHOTS LEFT: NOT READ");
+    row(d,8,"SOURCE NOT FOUND");
+}
 static void draw_panel(Diag *d){
     box(d,0,0,(int32_t)DIAG_W,(int32_t)DIAG_H,0xff101010u);
     box(d,0,0,(int32_t)DIAG_W,2,0xffffffffu);box(d,0,(int32_t)DIAG_H-2,(int32_t)DIAG_W,2,0xffffffffu);
@@ -328,8 +395,12 @@ static void draw_panel(Diag *d){
     case 5:page_cancels(d);break;
     case 6:page_log(d,0);break;
     case 7:page_log(d,11);break;
-    case 8:page_glog(d);break;
-    case 9:page_pre(d);break;
+    case 8:page_tab(d,0);break;
+    case 9:page_tab(d,1);break;
+    case 10:page_tab(d,2);break;
+    case 11:page_rlhk(d);break;
+    case 12:page_glog(d);break;
+    case 13:page_pre(d);break;
     default:page_cells(d);break;
     }
 }
@@ -571,12 +642,15 @@ static void cancel_why(Diag *s,uint32_t reason){
     disarm(s);drop_loaded(s);s->sequence=0;s->marked=0;s->proof=0;s->reattach=0;s->diag_on=0;
     detach_all(s);
 }
-static Diag *create(void);
+/* The release hook runs in a task that was not identified, so it never allocates: with no block it logs nothing. It writes only its own lane
+ * (rl_count with an atomic increment, rl_time) and one ring entry (atomic index); the table is reset by the UI task. */
 void grmod_cancel(void){
-    Diag *s=state();
-    if(!s){s=create();if(!s)return;}             /* the first shutter release makes the block, so the log starts there */
-    glog(s,GK_RELEASE,cur_ctype(),0);
-    cancel_why(s,R_EXT);
+    Diag *s=state();uint32_t now=0;
+    if(!s)return;
+    if(grmod_clock_ms(&now))s->rl_time=now;
+    __atomic_fetch_add(&s->rl_count,1u,__ATOMIC_RELAXED);
+    glog(s,GK_RELEASE,2,0);
+    if(s->hook)cancel_why(s,R_EXT);
 }
 
 static void update(Diag *s){
@@ -631,10 +705,9 @@ static void update(Diag *s){
     arm(s,now,have_clock);
 }
 
-static Diag *create(void){
-    Diag *s=state();uint32_t i;
-    if(s)return s;
-    s=(Diag *)heap_alloc(sizeof(*s));if(!s)return 0;
+static Diag *alloc_block(void){
+    Diag *s=(Diag *)heap_alloc(sizeof(*s));uint32_t i;
+    if(!s)return 0;
     zero_words(s,sizeof(*s));
     for(i=0;i<24;i++)s->view_vtable[i]=((const uint32_t *)(uintptr_t)0x53c0a8a0u)[i];
     s->view_vtable[2+0x4c/4]=(uint32_t)(uintptr_t)grmod_draw;
@@ -643,10 +716,15 @@ static Diag *create(void){
     s->timer_vtable[2]=(uint32_t)(uintptr_t)grmod_timer_expired;
     s->listener.vtable=s->timer_vtable;
     s->bitmap.width=DIAG_W;s->bitmap.height=DIAG_H;
-    s->timer_model=timer_get();
-    s->magic=MAGIC;
+    s->magic=MAGIC;                              /* published last: all or nothing */
     __asm__ volatile("dmb ish" ::: "memory");
     grmod_adapter_state=s;return s;
+}
+static Diag *create(void){
+    Diag *s=state();
+    if(!s)s=alloc_block();
+    if(s&&!s->timer_model)s->timer_model=timer_get();   /* not at allocation: the event hook may run before the timer model exists */
+    return s;
 }
 
 void grmod_on_shot(void){
@@ -660,6 +738,15 @@ void grmod_on_shot(void){
         uint32_t k,n=s->ng>8u?8u:s->ng;
         s->t_pre=now;s->npre=n;
         for(k=0;k<n;k++)s->pre[k]=s->glog[(s->ng-n+k)%NGLOG];
+    }
+    {   /* RL to HK of this photo, and the start of a new "between HK and RL" window */
+        uint32_t i;
+        tab_sync(s);
+        s->rlhk[2]=s->rlhk[1];s->rlhk[1]=s->rlhk[0];
+        s->rlhk[0]=s->rl_count!=s->hk_rl_count&&clock_ok?now-s->rl_time:0xffffffffu;
+        s->nrlhk++;s->hk_rl_count=s->rl_count;
+        for(i=0;i<s->ntab;i++)s->tab[i].win=0;
+        if(clock_ok)tab_boundary(s,GK_HOOK,now);
     }
     log_ev(s,L_HOOK,cur_ctype(),0);
     root=find_root(s,&s->rootfail_h,&controller);
@@ -697,41 +784,49 @@ void grmod_on_shot(void){
 void grmod_on_event(void *app,const uint16_t *event){
     Diag *s=state();uint32_t id,now=0,slot;
     (void)app;
-    if(!s||!event)return;
+    if(!s){                                      /* the UI task: the first event allocates the block, once; a failure is remembered in a spare RAM word */
+        if(grmod_alloc_flag)return;
+        s=alloc_block();
+        if(!s){grmod_alloc_flag=1;return;}
+    }
+    if(!event)return;
     id=event[0];
     s->ev_total++;
     if(!grmod_clock_ms(&now))return;
+    tab_sync(s);tab_hit(s,id,now);
     slot=id&15u;
     if(s->ev_id[slot]==id&&now-s->ev_t[slot]<500u)return;
     s->ev_id[slot]=(uint16_t)id;s->ev_t[slot]=now;
     s->ev_logged++;
-    {GLogE *e=&s->glog[s->ng%NGLOG];e->code=(uint16_t)id;e->ctype=2;e->aux=0;e->t=now;s->ng++;}
+    {GLogE *e=&s->glog[__atomic_fetch_add(&s->ng,1u,__ATOMIC_RELAXED)%NGLOG];e->code=(uint16_t)id;e->ctype=2;e->aux=0;e->t=now;}
 }
 
 void grmod_timer_expired(void *listener,uint32_t id){
     Diag *s=state();
-    if(!s||listener!=&s->listener||!id||id!=s->timer_id)return;
+    if(!s||!s->hook||listener!=&s->listener||!id||id!=s->timer_id)return;
     s->timer_id=0;
     s->ticks++;
     if(s->transition)return;
     update(s);
 }
 void grmod_before_transition(void *old_controller,uint32_t destination_id){
-    Diag *s=state();uint32_t id=destination_id-0x08000000u;if(!s)return;
+    Diag *s=state();uint32_t id=destination_id-0x08000000u,now=0;if(!s||!s->hook)return;
     ++s->transition;s->trans_b++;
+    if(grmod_clock_ms(&now)){tab_sync(s);tab_hit(s,GK_BEFORE,now);}
     log_ev(s,L_BEFORE,ctype_of(old_controller),id&0xffu);
     if(id<=2||(id>=0x0cu&&id<=0x11u)){disarm(s);detach_all(s);}
     else cancel_why(s,R_TRANS);
 }
 void grmod_after_transition(void){
-    Diag *s=state();if(!s||!s->transition)return;
+    Diag *s=state();uint32_t now=0;if(!s||!s->hook||!s->transition)return;
     s->trans_a++;
+    if(grmod_clock_ms(&now)){tab_sync(s);tab_hit(s,GK_AFTER,now);}
     log_ev(s,L_AFTER,cur_ctype(),0);
     if(--s->transition)return;
     update(s);
 }
 void grmod_before_canvas_delete(void *root){
-    Diag *s=state();if(s&&s->root==root)cancel_why(s,R_CANVAS);
+    Diag *s=state();if(s&&s->hook&&s->root==root)cancel_why(s,R_CANVAS);
 }
 void grmod_before_audio_shutdown(void){}
 

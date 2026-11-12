@@ -55,7 +55,7 @@ def main():
 1. The four Loaded views had the rectangle 0,0,0,0 when they were attached on a timer tick, so every draw was rejected (code 11). The cause, reproduced with the camera's own layout code in the emulator:
    a fresh view already carries its own "needs layout" flag, so showing it does not flag the root, and a root that has just been painted never visits it. This image asks the root to lay out its new children (variant A below).
 2. For a film look the completion hook this adapter uses fires 15 to 20 s after the photo (the film processing), not at the exposure. This image does not change the trigger; it records every UI event the camera dispatches with the clock,
-   to find an earlier one (pages 9 and 10).
+   to find an earlier one (pages 9 to 12).
 
 - File: `fwdc239b.bin`, {len(image):,} bytes
 - SHA-256: `{sha(image)}`
@@ -72,21 +72,31 @@ Check the file first (PowerShell): `Get-FileHash .\\fwdc239b.bin -Algorithm SHA2
 - C: stage 1e's behaviour, timer ticks and no request (the control).
 Expected if the analysis is right: in A the proof patterns (red 1 top, green 2 bottom, blue 3 counter, yellow 4 tab) and then the strips appear by themselves; B and C behave like 1e (page 4 `ABS` rows `0 0 0 0`, page 3 reject 11) unless the camera happens to lay out the tree itself.
 
-## Test card
+## Test card (keep the camera on, film the screen for the whole of each step)
 
-1. Standard look: take three photos, waiting about 5 s between them. Note on each photo whether the panel, the four coloured patterns and then the strips appear without touching anything, and which variant the panel says.
-2. Portra 400: take three photos, waiting for the camera to be ready (about 20 s) between them. Same notes. Film or photograph the corner of the screen for the whole time, and note the time of each shutter press.
-3. After the last photo wait until the panel shows, then film it for the full 15 s (ten pages, 1.5 s each); pages 9 and 10 are the new ones.
-4. Report the video, the photo count against the `HOOK` counter (page 5), and any photo where you half-pressed.
+1. Portra 400, ONE photo, no half press afterwards, touch nothing for 30 s. Film the screen for the whole 30 s and note the time of the shutter press. The panel appears when the completion hook fires (about 15 to 20 s for a film) and stays 21 s.
+2. Standard look, ONE photo, same: nothing touched for 30 s, filmed.
+3. Portra 400, a normal shot: half press, then full press (and release), then wait 30 s, filmed.
+4. When a panel is up, photograph pages 9, 10, 11 and 12 (the table) each time they come round (each page shows for 1.5 s, the cycle is 21 s). Also page 5 (`HOOK`) once.
+5. Report the video and the photos, the number of photos taken against the `HOOK` counter, and which variant (A, B, C) each photo had.
 
-## The panel, ten pages of 1.5 s, about 15 s after each hook
+## The panel, fourteen pages of 1.5 s, about 21 s after each hook
 
 Pages 1 to 8 are those of stage 1e (cells and variant, per-view draw counts by controller type, last reject and surface, absolute rectangles, event counters, cancels and timing, the log of the last shot, second part). Reject codes: 1 no surface, root or transition running; 2 view not on / not attached / Loaded not running; 3 unknown view or no buffer;
 4 nothing visible in this view; 5 view hidden; 6 parent is not the root; 7 surface is not the root's; 8 surface format is not 5; 9 surface geometry unusable; 10 surface size overflow; 11 rectangle unusable or different from the view's size; 12 clip unusable; 13 empty intersection.
-- Page 9: the last 8 events of the global log with the time since the previous one (ms): `RL` shutter release hook, `HK` completion hook, `TB`/`TA` transition before/after, `AT` Loaded views attached, `D1..D4` first successful copy of each Loaded view, `PD` first panel draw call, `XC` a cancel,
-  or a 4-digit hex number: a UI event id the camera dispatched (one per id and 500 ms). Then `UI EV` (all UI events seen) and `LOGGED`.
-- Page 10: the 8 events before the last hook with their distance to it (`-ms`): this shows what happened on the camera between the shutter and the completion hook (events logged since the first shutter release after power on).
-- The log (160 entries) and the counters survive across photos; the first shutter release after power on creates the panel block (before it nothing is logged).
+
+**Pages 9, 10 and 11: what happened after the shutter.** One row per distinct id: the UI event ids the camera dispatches (4 hex digits), plus the synthetic kinds `RL` (shutter release hook), `HK` (completion hook), `TB` / `TA` (transition before / after). Up to 24 rows (`ROWS` and `OVF` at the foot of each page: ids beyond 24 are counted, not shown).
+Columns: `ID`, `FIRST` the time of the first occurrence after the most recent RL (seconds since that RL, one decimal), `LAST` the time of the last occurrence (seconds since that RL), `N` how many times since that RL, and a `!` at the end of the row if the same id also occurred between the previous HK and this RL (so a `!` row is periodic, not tied to a photo).
+Rows are sorted by FIRST, eight per page (1/3, 2/3, 3/3). The per-RL fields are reset at every RL; an id that fires every 33 ms still takes one row. Ids that did not occur since the last RL are not shown.
+**Page 12: RL to HK** for the last three photos (the delay between the shutter release hook and the completion hook, `NO RL` if no release happened since the previous hook), and the RL and HK counts. The shots-left counter is not shown: I did not find where it is stored.
+Pages 13 and 14 are the raw log: the last 8 global events with the time since the previous one, and the 8 events before the last hook.
+
+## Who writes the log (the design note)
+
+- The block (a 170 KB buffer, the same kind as the panel's) is allocated by the UI-event hook on the first UI event it sees, once; if the allocation fails a spare RAM word is set and the hook never tries again. The shot hook still allocates it if it does not exist yet, as before.
+- The shutter release hook runs in a task that is not identified, so it never allocates. With no block it does nothing. With a block it writes only its own lane: an atomic increment of `rl_count`, the clock into `rl_time`, and one ring entry (the ring index is claimed with an atomic increment, so UI-task and release-hook entries cannot overwrite each other). It still cancels a running shot, as every stage has.
+- The distinct-id table has one writer, the UI-task callbacks (event hook, transition hooks, shot hook); the release lane is folded into it on the next UI-task callback. The other hooks do nothing until the first photo.
+- Cost: measured in the emulator through the real trampoline and the real dispatcher, one dispatched event costs about 130 to 160 instructions (trampoline included, clock read included); the worst case, a full table and an id not in it, about 280 in the callback. Events that arrive faster than 500 ms for many different ids: the table counts all of them (24 rows, overflow counted), the ring takes one entry per id and 500 ms, per 16 id slots, and is bounded (160 entries, it wraps).
 
 ## If it gets stuck
 
@@ -98,7 +108,7 @@ Passed in emulation on the delivered bytes ({adapter['assertions']} assertions i
 Layout reproduced and fixed with the original native layout pass; all earlier 1e scenarios (flows, failure cells, counters, reject codes, draw statistics) plus the global log, the release hook creating the block, the sixth hook and the pre-hook snapshot. Other checks: {', '.join(f'{k} {v}' for k, v in counts.items())}.
 Diag block {adapter['diag_block_bytes']:,} bytes.
 
-Not checked: any real camera; whether the camera lays the tree out itself after the hook (the panel works at the hook on the camera, which suggests it does); what the UI events mean (that is what this test collects); whether allocating the block from the release hook is safe in that task.
+Not checked: any real camera; whether the camera lays the tree out itself after the hook (the panel works at the hook on the camera, which suggests it does); what the UI events mean (that is what this test collects); whether allocating the block from the UI-event hook at the first event is safe that early (the UI task has run by then, nothing else is touched at that moment); the shots-left counter.
 """
     (OUT/'README.md').write_text(readme, encoding='utf-8', newline='\n')
     print(json.dumps(summary, indent=2))

@@ -26,7 +26,8 @@ LAYOUT = ['ld', 'cell', 'step', 'film', 'shots', 'ld_pixels', 'ld_engine', 'ld_v
           'vs', 'sizeof_vs', 'hook', 'rootfail_h', 'rootfail_u', 'last_vt', 'trans_b', 'trans_a', 'ticks', 'stale', 'late', 'cancels', 'last_cancel', 'proof',
           'page', 'variant', 't_root', 't_att', 't_first', 'first_draw_ms', 'panel_calls_shot', 'log', 'nlog', 'surf', 'sizeof_log', 'ld_copies_shot',
           'last_cancel_hook', 'reattach', 'proof_seen', 'tk_panel', 'tk_ld', 'first_copy_mask',
-          'glog', 'ng', 'sizeof_glog', 'pre', 'npre', 't_pre', 'ev_total', 'ev_logged']
+          'glog', 'ng', 'sizeof_glog', 'pre', 'npre', 't_pre', 'ev_total', 'ev_logged',
+          'tab', 'sizeof_tabrow', 'ntab', 'tab_ovf', 'rl_count', 'rl_time', 't_rl', 'rlhk', 'nrlhk', 'hk_rl_count']
 PROOF_COL = [0xff0000ff, 0xff00ff00, 0xffff0000, 0xff00ffff]
 COLOUR = {GREY: 0xff5a5a5f, RUN: 0xff14a0fa, OK: 0xff46be28, BAD: 0xff2828dc}
 CELL_NAMES = ['1 hook+clock', '2 root', '3 film', '4 state', '5A top buffer', '5B bottom buffer', '5C counter buffer',
@@ -95,6 +96,14 @@ class D(cl.LoadedFixture):
             at = self.s() + self.L['pre'] + k * self.L['sizeof_glog']
             w0 = self.get(at)
             out.append((w0 & 0xffff, self.get(at + 4)))
+        return out
+
+    def tab(self):
+        out = []
+        for k in range(self.v('ntab')):
+            at = self.s() + self.L['tab'] + k * self.L['sizeof_tabrow']
+            w0 = self.get(at)
+            out.append((w0 & 0xffff, (w0 >> 16) & 255, (w0 >> 24) & 255, self.get(at + 4), self.get(at + 8), self.get(at + 12)))
         return out
 
     def cancels(self):
@@ -199,13 +208,13 @@ def verify(data, segments, symbols):
     want = cl.js_hashes([cl.jscase('shot', slot_film[75], 1, 1, 33)])[0][1:]
     ok(p.ld_hashes() == want, 'after the proof the real moment starts and its first frame equals the JS reference')
     start = p.now
-    while p.timers() and p.now - start < 18000:
+    while p.timers() and p.now - start < 25000:
         p.fire(33)
         if not p.children(root):
-            ok(p.now - start + 1000 + 20 * 33 + 33 * 31 >= 14900, 'the panel stays about fifteen seconds')
+            ok(p.now - start + 1000 + 20 * 33 + 33 * 31 >= 20900, 'the panel stays about twenty-one seconds')
     ok(len(p.children(root)) == 0 and not p.timers(), 'the panel and everything else are gone after the panel window')
     checks.append('first shot (variant A): hook makes 3 allocations, two ticks per step, twelve cells green, proof patterns (outline, block, digit, transparent rest) in all four buffers '
-                  'and on the screen through the original canvas draw for one second, then the real moment whose first frame equals the JS reference, everything gone after the 15 s window')
+                  'and on the screen through the original canvas draw for one second, then the real moment whose first frame equals the JS reference, everything gone after the 21 s window')
 
     # ---- A2. layout (stage 1e's field finding): a view attached to a clean root keeps the rectangle 0,0,0,0 unless the root is asked to lay out its children
     def session(variant):
@@ -269,7 +278,7 @@ def verify(data, segments, symbols):
         ok(q.cells() == expected(2), (name, q.cells()))
         ok(q.info()[0] == text, (name, q.info()))
         ok(q.ld() == 0 and q.children(q.roots[0]) == [q.diag_view()], f'{name}: only the panel is attached, no Loaded state')
-        for _ in range(600):
+        for _ in range(800):
             q.fire(33)
         ok(not q.children(q.roots[0]) and not q.timers(), f'{name}: the panel goes after its window')
         q.canaries()
@@ -365,7 +374,7 @@ def verify(data, segments, symbols):
     for _ in range(25):
         q.tick()
     ok(q.cells()[0] == BAD and q.cells()[10] == BAD and q.ld() != 0 and len(q.children(q.roots[0])) == 1, ('no clock: loaded_start cannot be given a time', q.cells()))
-    for _ in range(600):
+    for _ in range(800):
         q.fire(33)
     ok(not q.children(q.roots[0]) and not q.timers(), 'no clock: the panel leaves after 182 ticks')
     q.clock_ok = True
@@ -561,51 +570,125 @@ def verify(data, segments, symbols):
     q.canaries()
     checks.append('H>R, H>A (hook to root found and to attached) and H>T (hook to first tick) are kept per shot')
 
-    # ---- H. the global event log, the release hook, the sixth hook (UI events), the snapshot before the last hook
+    # ---- H. who allocates and when, the distinct-id table, RL to HK, the cost per dispatched event
+    ev = ca.EVENT + 0x400
+
+    def evt(q, ident, dt=0):
+        q.now += dt
+        q.uc.mem_write(ev, struct.pack('<H', ident))
+        q.call('grmod_on_event', ca.APP, ev)
+
+    # H1. the release hook never allocates; the first UI event allocates the block once, with nothing else touched
     q = new()
+    n0 = len(q.allocations)
     q.call('grmod_cancel')
-    ok(q.s() != 0 and q.v('ng') == 2 and q.glog()[0][0] == 0x1001 and q.glog()[1][0] == 0x100b and q.cancels()[9] == 1, 'the first shutter release creates the block and is the first log entry')
-    q.now += 700
-    q.call('grmod_on_shot')
-    q.now += 33
-    evid = struct.unpack('<H', q.uc.mem_read(ca.EVENT, 2))[0]
-    q.fire(33)
-    log = q.glog()
-    ok(any(e[0] == evid for e in log) and q.v('ev_total') >= 1, ('the sixth hook logs the UI event id with a clock time', hex(evid), [hex(e[0]) for e in log]))
-    logged = q.v('ev_logged')
-    for _ in range(5):
-        q.fire(33)
-    ok(q.v('ev_logged') == logged and q.v('ev_total') >= 6, 'the same event id is logged once per 500 ms')
-    q.fire(600)
-    ok(q.v('ev_logged') == logged + 1, 'and again after 500 ms')
-    ts = [e[3] for e in q.glog()]
-    ok(ts == sorted(ts), 'the log is in clock order')
-    names = [e[0] for e in q.glog()]
-    ok(names[:3] == [0x1001, 0x100b, 0x1002], ('release, its cancel, then the completion hook', [hex(n) for n in names[:4]]))
-    # a second photo: the eight events before its hook are kept with their distance to it
-    before = q.glog()
-    q.now += 2000
-    q.call('grmod_on_shot')
-    pre = q.pre()
-    ok(len(pre) == min(8, len(before)) and [x[0] for x in pre] == [e[0] for e in before[-8:]] and q.v('t_pre') == q.now, ('pre-hook snapshot', pre))
-    ok([e for e in q.glog() if e[0] == 0x1002][-1][3] == q.now, 'the hook entry carries the clock of the hook')
-    ok(q.v('hook') == 2, 'two hooks')
-    # transitions, attach and first copies are in the global log across photos
-    for _ in range(21):
-        q.tick()
-    q.call(0x53391b14, q.roots[0])
+    ok(q.s() == 0 and len(q.allocations) == n0, 'the release hook never allocates: with no block it does nothing')
+    evt(q, 0x199)
+    ok(q.s() != 0 and len(q.allocations) == n0 + 1 and q.allocations[-1][1] == q.L['sizeof_diag'] and q.v('ev_total') == 1, 'the first UI event allocates the block, once')
+    evt(q, 0x199, 10)
+    evt(q, 0x2222, 10)
+    ok(len(q.allocations) == n0 + 1 and q.v('ev_total') == 3 and q.v('ntab') == 2, 'later events allocate nothing')
     q.call('grmod_before_transition', cl.LV, 0x0800000c)
     q.call('grmod_after_transition')
-    codes = [e[0] for e in q.glog()]
-    ok(0x1005 in codes and 0x1006 in codes and 0x1009 in codes and 0x1003 in codes and 0x1004 in codes, ('attach, first copies, transitions are logged', [hex(c) for c in codes]))
-    q.call('grmod_cancel')
-    codes = [e[0] for e in q.glog()]
-    ok(codes[-2:] == [0x1001, 0x100a] or codes[-2:] == [0x1001, 0x100b], ('the release and its cancel are the last entries', [hex(c) for c in codes[-3:]]))
-    ts = [e[3] for e in q.glog()]
-    ok(ts == sorted(ts), 'clock order across photos')
+    q.call('grmod_before_canvas_delete', q.roots[0])
+    q.call('grmod_timer_expired', 0, 0)
+    ok(q.v('trans_b') == 0 and q.v('trans_a') == 0 and q.cancels() == [0] * 10 and not q.children(q.roots[0]), 'the other hooks stay inert until the first photo')
+    base = len(q.allocations)
+    q.call('grmod_on_shot')
+    ok([s for _, s in q.allocations[base:]] == [248, 4] and len(q.timers()) == 1, 'a photo after the block exists allocates only the panel view and the child slot, and starts its timer')
+    for _ in range(21):
+        q.tick()
+    ok(q.cells() == [OK] * 12, 'the whole sequence works on a block made by the event hook')
+    # H2. an allocation failure in the event hook is remembered in a spare RAM word and never retried; the shot hook still allocates
+    q = new()
+    q.fail_at = {0}
+    q.alloc_count = 0
+    evt(q, 0x199)
+    ok(q.s() == 0 and q.get(0x5580438c) == 1, 'a failed allocation leaves no block and sets the flag word')
+    q.fail_at = set()
+    count = len(q.allocations)
+    for _ in range(5):
+        evt(q, 0x199, 10)
+    ok(q.s() == 0 and len(q.allocations) == count, 'and the event hook never tries again')
+    q.call('grmod_on_shot')
+    ok(q.s() != 0 and len(q.children(q.roots[0])) == 1, 'the shot hook allocates as before')
+    # H3. the distinct-id table: first and last time, count since the last RL, periodic ids marked
+    q = new()
+    q.call('grmod_on_shot')                                        # hook 1 at t0
+    t0 = q.now
+    for i in range(5):
+        evt(q, 0x199, 33)
+    evt(q, 0x2222, 100)
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x199][5] == 5 and rows[0x199][3] == t0 + 33 and rows[0x199][4] == t0 + 165 and rows[0x2222][5] == 1, ('counts, first and last', rows))
+    q.now += 400
+    q.call('grmod_cancel')                                         # RL: the release lane only
+    ok(q.v('rl_count') == 1 and q.v('rl_time') == q.now and q.tab()[0][5] != 0, 'the release hook writes its lane and does not touch the table')
+    trl = q.now
+    evt(q, 0x199, 33)                                              # the UI task syncs the table
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x199][5] == 1 and rows[0x199][3] == trl + 33 and rows[0x199][2] == 1, ('after the RL: reset, count 1, periodic', rows[0x199]))
+    ok(rows[0x2222][5] == 0 and rows[0x2222][2] == 1 and rows[0x1001][5] == 1 and rows[0x1001][3] == trl, 'a silent id is hidden (count 0) but remembered as periodic; the RL row is at time 0')
+    evt(q, 0x3333, 100)
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x3333][5] == 1 and rows[0x3333][2] == 0 and rows[0x3333][3] == trl + 133, 'a new id after the RL is not periodic')
+    # the completion hook of this photo: RL to HK, and a new window
+    q.now += 14000
+    q.call('grmod_on_shot')
+    ok(q.v('nrlhk') == 2 and q.get(q.s() + q.L['rlhk']) == q.now - trl, ('RL to HK', q.get(q.s() + q.L['rlhk'])))
+    rows = {r[0]: r for r in q.tab()}
+    ok(rows[0x3333][1] == 0 and rows[0x1002][1] == 0 and rows[0x1002][5] == 1, 'HK clears the window flags')
+    q.now += 500
+    q.call('grmod_on_shot')                                        # a second photo with no RL since the previous HK
+    ok(q.get(q.s() + q.L['rlhk']) == 0xffffffff, 'no RL since the previous hook: NO RL')
+    # H4. more distinct ids than rows: counted as overflow, nothing else disturbed
+    q = new()
+    q.call('grmod_on_shot')
+    for i in range(30):
+        evt(q, 0x4000 + i, 1)
+    ok(q.v('ntab') == 24 and q.get(q.s() + q.L['tab_ovf']) == 7, ('table full: the HK row and 23 ids, 7 overflowed', q.v('ntab'), q.get(q.s() + q.L['tab_ovf'])))
+    evt(q, 0x4001, 1)
+    ok({r[0]: r for r in q.tab()}[0x4001][5] == 2, 'existing rows keep counting when the table is full')
+    ok(q.v('ng') <= 400 and q.v('ev_logged') >= 1, 'the ring stays bounded')
+    # H5. the cost of one dispatched event, in instructions, measured through the real trampoline and the real dispatcher on the timer event
+    from unicorn import UC_HOOK_CODE
+    q = new()
+    q.call('grmod_on_shot')
+    state = {'on': False, 'n': 0}
+    samples = []
+    entry = q.symbols['grmod_hook_event']
+
+    def count(uc, at, size, user):
+        if at == entry:
+            state['on'] = True
+            state['n'] = 0
+        if state['on']:
+            state['n'] += 1
+            if at == 0x53228ab8:
+                state['on'] = False
+                samples.append(state['n'])
+    q.uc.hook_add(UC_HOOK_CODE, count)
+    q.fire(33)                                                      # a new id: row created, ring written
+    q.fire(33)                                                      # the same id within 500 ms: row found, ring not written
+    q.fire(600)                                                     # after 500 ms: ring written again
+    cost = dict(new_id=samples[0], same_id_within_500ms=samples[1], same_id_after_500ms=samples[2])
+    worst = {'on': False, 'n': 0}
+
+    def anyhook(uc, at, size, user):
+        if worst['on']:
+            worst['n'] += 1
+    q.uc.hook_add(UC_HOOK_CODE, anyhook)
+    for i in range(30):
+        evt(q, 0x5000 + i, 1)
+    worst['on'] = True
+    evt(q, 0x6000, 1)                                               # table full, an id that is not in it: the longest search, no row
+    worst['on'] = False
+    cost['table_full_unknown_id_callback_only'] = worst['n']
+    ok(len(samples) == 3 and max(samples) < 400 and worst['n'] < 400, ('cost per dispatched event in instructions', cost))
     q.canaries()
-    checks.append('global log: the first shutter release creates the block and starts it; the sixth hook logs UI event ids with the clock (once per id and 500 ms); the eight events before a hook are kept with their distance to it; '
-                  'release, hook, transitions, attach and first copies are logged across photos in clock order')
+    checks.append('allocation context: the release hook never allocates (no block, no log), the first UI event allocates the block once, a failed allocation sets a spare RAM flag word and is never retried, the other hooks are inert before the first photo, '
+                  'and a photo after the block exists allocates only the panel view; the distinct-id table (first, last, count since the RL, periodic marks, reset at the RL by the UI task, 24 rows with overflow counted); '
+                  f'RL to HK for the last three photos; cost per dispatched event {cost} instructions (trampoline included)')
 
     return dict(checks=checks, assertions=counts['n'], diag_block_bytes=p.L['sizeof_diag'], loaded_state_bytes=p.L['sizeof_ld'],
                 cells=CELL_NAMES, hardware_tested=False)

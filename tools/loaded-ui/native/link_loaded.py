@@ -124,7 +124,7 @@ def build(args):
         at = 0x53228AB4 - RTOS_BASE
         patches = [*patches, dict(address=0x53228AB4, expected=pack[at:at+4].hex(), symbol='grmod_hook_event', link=False,
                                   reason='Log every UI event the camera dispatches (stage 1f diagnostic)')]
-        native = {**native, 'native_event_resume': 0x53228AB8}
+        native = {**native, 'native_event_resume': 0x53228AB8, 'grmod_alloc_flag': 0x5580438C}
     pack_tools.check_pack(pack, stock, patches)
     base = pack_tools.RTOS_BASE + len(pack)
     # The slot-to-film table comes from the names in THIS image; a slot without a Loaded film refuses the base.
