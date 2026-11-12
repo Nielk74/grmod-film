@@ -26,7 +26,10 @@ sys.path.insert(0, str(NATIVE_TERMINAL))
 import link_firmware as official  # noqa: E402  SERVICES, PATCHES, NATIVE_SYMBOLS
 import link_firmware_filmpack as pack_tools  # noqa: E402  decode_container, rtos_of, check_pack, flatten
 
-OUT = LAB/'out'/'firmware-loaded-stage1'
+import os  # noqa: E402
+DIAG = os.environ.get('LOADED_VARIANT') == 'diag'      # stage 1d: the diagnostic adapter, its own folder and marker
+OUT = LAB/'out'/('firmware-loaded-stage1d-diagnostic' if DIAG else 'firmware-loaded-stage1')
+ADAPTER = 'camera_diag.c' if DIAG else 'camera_loaded.c'
 BUILD = OUT/'build'
 EXPECTED_PACK_SHA256 = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
 sha = pack_tools.sha
@@ -147,7 +150,7 @@ SECTIONS {{
     flags = ['-target', 'armv7-none-eabi', '-mcpu=cortex-a9', '-marm', '-mfloat-abi=soft', '-mfpu=none',
              '-Os', '-ffreestanding', '-fno-builtin', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables',
              '-fno-stack-protector', '-fno-common', '-fdata-sections', '-ffunction-sections', '-Wall', '-Wextra', '-Werror']
-    sources = [HERE/'loaded.c', HERE/'camera_loaded.c', NATIVE_TERMINAL/'camera_clock.c', NATIVE_TERMINAL/'hooks.S', BUILD/'assets.S']
+    sources = [HERE/'loaded.c', HERE/ADAPTER, NATIVE_TERMINAL/'camera_clock.c', NATIVE_TERMINAL/'hooks.S', BUILD/'assets.S']
     objects = []
     for source in sources:
         target = BUILD/(source.stem+'.o')
@@ -164,7 +167,7 @@ SECTIONS {{
         raise ValueError('The audio latch must be a read-only word holding 1')
     headers = [HERE/'loaded.h', HERE/'loaded_data.h', HERE/'camera_loaded.h', NATIVE_TERMINAL/'camera_clock.h', BUILD/'loaded_slots.h']
     source_paths = [*sources[:-1], *headers, Path(__file__), LAB/'build-loaded-stage1.ts']
-    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage=1, hardwareTested=False,
+    manifest = dict(schema=1, camera='GR III', baseVersion='2.10', silent=True, stage='1d' if DIAG else 1, hardwareTested=False,
                     packSha256=sha(pack_file), packRtosSha256=sha(pack), packRtosBytes=len(pack), base=base,
                     payloadSha256=sha(payload), payloadBytes=len(payload), elfSha256=sha(elf_path.read_bytes()),
                     symbols=symbols, slots=names, patches=patches, stateWord=pack_tools.STATE_WORD, audioLatchReadOnly=latch,

@@ -12,7 +12,7 @@ import {selfCheckGrown} from '../../core/src/fw/selfcheck';
 import {GR3_210} from '../../core/src/fw/gr3x/profile';
 import {branchWord} from '../../core/src/fw/aspect/arm';
 
-const here=dirname(fileURLToPath(import.meta.url)),out=join(here,'out','firmware-loaded-stage1'),build=join(out,'build');
+const here=dirname(fileURLToPath(import.meta.url)),diag=process.env.LOADED_VARIANT==='diag',out=join(here,'out',diag?'firmware-loaded-stage1d-diagnostic':'firmware-loaded-stage1'),build=join(out,'build');
 const hash=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex');
 function check(condition:unknown,message:string):asserts condition{if(!condition)throw Error(`Loaded stage 1 on film pack: ${message}`);}
 const [input,output=join(out,'fwdc239b.bin')]=process.argv.slice(2);
@@ -21,7 +21,7 @@ const pack=new Uint8Array(readFileSync(resolve(input)));
 const manifest=JSON.parse(readFileSync(join(build,'payload-manifest.json'),'utf8'));
 const payload=new Uint8Array(readFileSync(join(build,'loaded-payload.bin')));
 check(hash(pack)===manifest.packSha256,'this is not the film pack the payload was linked against');
-check(manifest.schema===1&&manifest.camera==='GR III'&&manifest.silent===true&&manifest.stage===1&&manifest.hardwareTested===false,'manifest identity');
+check(manifest.schema===1&&manifest.camera==='GR III'&&manifest.silent===true&&manifest.stage===(diag?'1d':1)&&manifest.hardwareTested===false,'manifest identity');
 check(hash(payload)===manifest.payloadSha256&&payload.length===manifest.payloadBytes,'linked payload changed');
 for(const [path,expected] of Object.entries(manifest.sourceHashes)){
   check(hash(new Uint8Array(readFileSync(resolve(here,'..','..',path))))===expected,`source changed after link:${path}`);
@@ -77,7 +77,7 @@ const sectionReport=sections.map((section,i)=>{
   check(section.name==='RTOS'||beforeHash===afterHash,`film pack section changed:${section.name}`);
   return{name:section.name,beforeBytes:sectionData(decoded,section).length,afterBytes:sectionData(next,other).length,beforeSha256:beforeHash,afterSha256:afterHash};
 });
-const report={schema:1,camera:'GR III',baseVersion:'2.10',filename:'fwdc239b.bin',silent:true,stage:1,
+const report={schema:1,camera:'GR III',baseVersion:'2.10',filename:'fwdc239b.bin',silent:true,stage:diag?'1d':1,
   packSha256:hash(pack),outputSha256:hash(built.out),outputBytes:built.out.length,decodedBytes:next.length,
   rtosGrowth:growth,payloadBytes:payload.length,rtosRuntimeEnd:base+growth,slots:manifest.slots,hardwareTested:false,versionRaised:false,
   checks,patches,sections:sectionReport};
