@@ -4,6 +4,13 @@
  * arithmetic (as JS >>); divisions are truncating (as JS / then |0). */
 #include "loaded.h"
 #include "loaded_data.h"
+/* The roll length the counter, the "FRAMES EXPOSED" text and the rewind use. 36 always, except in the stage 5a TEST image (-DGRMOD_ROLL_LEN=3) where a roll
+ * is three frames; the contact sheet itself always shows 36 frames. */
+#ifdef GRMOD_ROLL_LEN
+#define RLEN GRMOD_ROLL_LEN
+#else
+#define RLEN LD_ROLL_LENGTH
+#endif
 
 #define W 720
 #define H 480
@@ -496,12 +503,12 @@ static void counter_prepare(prep_t *q, uint32_t frame) {
   int32_t t = q->t;
   c->a = c->b = (int32_t)frame; c->p = 0; c->dir = 1; c->linear = 0;
   if (q->moment == LOADED_SHOT) {
-    c->b = frame >= LD_ROLL_LENGTH ? (int32_t)frame : (int32_t)frame + 1;
-    c->p = frame >= LD_ROLL_LENGTH ? 0 : prog(t, ld_roll_win[q->kind][0], ld_roll_win[q->kind][1]);
+    c->b = frame >= RLEN ? (int32_t)frame : (int32_t)frame + 1;
+    c->p = frame >= RLEN ? 0 : prog(t, ld_roll_win[q->kind][0], ld_roll_win[q->kind][1]);
   } else if (q->moment == LOADED_LOAD) {
     c->a = 255; c->b = (int32_t)frame; c->p = prog(t, LD_LOAD_ROLL_A, LD_LOAD_ROLL_B);
   } else if (q->moment == LOADED_ROLL) {
-    int32_t pos = LD_ROLL_LENGTH * ONE - ((LD_ROLL_LENGTH - 1) * in_out(prog(t, LD_REWIND_A, LD_REWIND_B)));
+    int32_t pos = RLEN * ONE - ((RLEN - 1) * in_out(prog(t, LD_REWIND_A, LD_REWIND_B)));
     int32_t n = pos >> 10, frac = pos & 1023;
     c->dir = -1; c->linear = 1;
     if (frac == 0) { c->a = c->b = n; c->p = 0; } else { c->a = n + 1; c->b = n; c->p = ONE - frac; }
@@ -543,7 +550,7 @@ static void prepare(prep_t *q, const loaded_params *p, int32_t elapsed) {
   q->kind = f->kind; q->dur = (int32_t)loaded_duration(p->film, moment);
   q->active = (moment == LOADED_SHOT || moment == LOADED_LOAD || moment == LOADED_ROLL) && elapsed >= 0 && elapsed < q->dur;
   t = elapsed < 0 ? 0 : elapsed; q->t = t;
-  q->last = p->frame >= LD_ROLL_LENGTH;
+  q->last = p->frame >= RLEN;
   q->milk.lo = 0; q->milk.hi = 0; q->milk.frac = 0;
   if (q->active && moment == LOADED_SHOT && q->kind == K_INSTANT) milk_levels(&q->milk, t);
   q->off = q->ox = q->adv = q->vel = q->py = q->ej = 0;
@@ -614,14 +621,14 @@ static void draw_roll_band(surf *s, int top, const ld_film *f, uint32_t roll, in
       x += s_num(s, roll, x, 11, 3, P_EDGE, 0) + 36;
       s_text(s, f->label, x, 11, 3, P_WHT);
     } else if (t < 1800) {
-      int32_t w = s_num(s, LD_ROLL_LENGTH, 76, 11, 3, P_EDGE, 0);
+      int32_t w = s_num(s, RLEN, 76, 11, 3, P_EDGE, 0);
       s_text(s, "FRAMES EXPOSED.", 76 + w + 18, 11, 3, P_WHT);
     } else if (t < 2700) s_text(s, "REWINDING.", 76, 11, 3, P_WHT);
     else s_text(s, "FILM REWOUND.", 76, 11, 3, P_EDGE);
     return;
   }
   cx = rewind_cassette_x(t); tip = rewind_tip(t); racing = t >= LD_REWIND_A && t < 2700;
-  n = LD_ROLL_LENGTH - (((LD_ROLL_LENGTH - 1) * in_out(prog(t, LD_REWIND_A, LD_REWIND_B))) >> 10);
+  n = RLEN - (((RLEN - 1) * in_out(prog(t, LD_REWIND_A, LD_REWIND_B))) >> 10);
   if (tip > cx + 140) {
     for (r = 0; r < 42; r++) {
       int32_t c = r < 10 ? (10 - r) * 3 : r > 31 ? (r - 31) * 3 : 0;
@@ -820,7 +827,7 @@ int loaded_tick(loaded *L, const loaded_buffers *b, uint32_t now) {
     elapsed = now - L->start;                       /* unsigned: survives a wrapping 32-bit clock */
     if (elapsed >= loaded_duration(lp.film, L->moment)) {
       /* the moment is over: the tab and counter keep their peek window; the counter shows the new number */
-      L->linger_frame = L->moment == LOADED_ROLL ? 1u : (L->p.frame < LD_ROLL_LENGTH ? L->p.frame + 1u : L->p.frame);
+      L->linger_frame = L->moment == LOADED_ROLL ? 1u : (L->p.frame < RLEN ? L->p.frame + 1u : L->p.frame);
       L->linger = 1; L->active = 0;
       { /* the linger is the last 500 ms of a 2000 ms peek window. A roll runs 3400 ms, so it gets its own 500 ms; a shot
          * that is found over only after its whole window (a stalled UI) gets none: nothing outlives 2.0 s. */

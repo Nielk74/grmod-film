@@ -21,7 +21,7 @@ sys.path.insert(0, str(LAB.parent/'shot-animation'/'native'))
 import check_adapter as ca  # noqa: E402
 
 import os
-OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a', 'stage2b': 'firmware-loaded-stage2b-engine', 'stage3aengine': 'firmware-loaded-stage3a-engine', 'stage3afilmpack': 'firmware-loaded-stage3a-filmpack', 'stage3bengine': 'firmware-loaded-stage3b-engine', 'stage3bfilmpack': 'firmware-loaded-stage3b-filmpack', 'stage4aengine': 'firmware-loaded-stage4a-engine', 'stage4afilmpack': 'firmware-loaded-stage4a-filmpack', 'stage4btier2engine': 'firmware-loaded-stage4b-tier2-engine', 'stage4btier2filmpack': 'firmware-loaded-stage4b-tier2-filmpack'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
+OUT = LAB/'out'/{'diag': 'firmware-loaded-stage1d-diagnostic', 'diage': 'firmware-loaded-stage1e-diagnostic', 'diagf': 'firmware-loaded-stage1f-diagnostic', 'diagg': 'firmware-loaded-stage1g-diagnostic', 'stage2a': 'firmware-loaded-stage2a', 'stage2b': 'firmware-loaded-stage2b-engine', 'stage3aengine': 'firmware-loaded-stage3a-engine', 'stage3afilmpack': 'firmware-loaded-stage3a-filmpack', 'stage3bengine': 'firmware-loaded-stage3b-engine', 'stage3bfilmpack': 'firmware-loaded-stage3b-filmpack', 'stage4aengine': 'firmware-loaded-stage4a-engine', 'stage4afilmpack': 'firmware-loaded-stage4a-filmpack', 'stage4btier2engine': 'firmware-loaded-stage4b-tier2-engine', 'stage4btier2filmpack': 'firmware-loaded-stage4b-tier2-filmpack', 'stage5aengine': 'firmware-loaded-stage5a-engine', 'stage5afilmpack': 'firmware-loaded-stage5a-filmpack', 'stage5atest3engine': 'firmware-loaded-stage5a-test3-engine', 'stage5atest3filmpack': 'firmware-loaded-stage5a-test3-filmpack'}.get(os.environ.get('LOADED_VARIANT', ''), 'firmware-loaded-stage1')
 BUILD = OUT/'build'
 LV, QV, OTHER, SERVICE = ca.LV, ca.QV, ca.OTHER, ca.SERVICE
 RECORD = ca.RECORD
@@ -94,11 +94,11 @@ def js_hashes(cases):
     return json.loads(out.stdout)
 
 
-def jscase(moment, film, frame, roll, t, peek=None, hold=0):
+def jscase(moment, film, frame, roll, t, peek=None, hold=0, tier=1):
     # stage 1: the adapter starts the peek clock at the shot, so during a moment the clock equals the elapsed time
     if peek is None:
         peek = -1 if moment == 'live' else t
-    return dict(moment=moment, film=film, frame=frame, roll=roll, t=t, tabMode=1, counterMode=1, month=12, year=0, peek=peek, hold=hold)
+    return dict(moment=moment, film=film, frame=frame, roll=roll, t=t, tabMode=1, counterMode=1, month=12, year=0, peek=peek, hold=hold, tier=tier)
 
 
 def verify(data, segments, symbols):
