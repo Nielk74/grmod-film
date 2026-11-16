@@ -1,0 +1,29 @@
+{
+  "name": "grmod-shot-animation-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5186 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test test/*.test.mjs",
+    "verify:browser": "node verify-browser.mjs",
+    "render:previews": "node render-previews.mjs",
+    "export": "node export-compact.mjs && node prepare-actions.mjs && node export-sequences.mjs",
+    "export:legacy": "node export.mjs"
+  },
+  "dependencies": {
+    "@remotion/player": "4.0.540",
+    "gsap": "3.15.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.540"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "playwright": "1.62.1",
+    "sharp": "0.34.5",
+    "typescript": "5.6.3",
+    "vite": "5.4.21"
+  }
+}

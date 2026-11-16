@@ -1,0 +1,74 @@
+{
+  "researched_on": "2026-11-04",
+  "skills": [
+    {
+      "repository": "remotion-dev/skills",
+      "path": "skills/remotion-best-practices/SKILL.md",
+      "commit": "c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271",
+      "commit_date": "2026-11-02T08:50:21Z",
+      "observed_directory_installs": 749200
+    },
+    {
+      "repository": "greensock/gsap-skills",
+      "path": "skills/gsap-core/SKILL.md",
+      "commit": "96c4b013173fa9b01c059b036abc4d266a58c476",
+      "commit_date": "2026-03-09T17:48:10Z",
+      "observed_directory_installs": 82200
+    },
+    {
+      "repository": "pbakaus/impeccable",
+      "path": ".agents/skills/impeccable/SKILL.md",
+      "commit": "414603bf14c7a344edb466bb1f85690c77ce8b7d",
+      "commit_date": "2026-10-26T23:38:02Z",
+      "observed_directory_installs": 81700
+    },
+    {
+      "repository": "mengto/skills",
+      "path": "agent-skills/illustration/illustration-ink-sketch/SKILL.md",
+      "commit": "9a2e5d3dca0cffa4ab85fcb533f5d91b9dd88b5b",
+      "commit_date": "2026-10-06T11:13:45Z",
+      "observed_directory_installs": 343
+    },
+    {
+      "repository": "mengto/skills",
+      "path": "agent-skills/illustration/illustration-bold-pop/SKILL.md",
+      "commit": "9a2e5d3dca0cffa4ab85fcb533f5d91b9dd88b5b",
+      "commit_date": "2026-10-06T11:13:45Z",
+      "observed_directory_installs": null
+    }
+  ],
+  "art_tool": "Codex built-in imagegen",
+  "active_art": "src/assets/terminal-core-v5/ + terminal-actions-v5-normalized.png",
+  "active_art_sha256": "e9b79c6433996e342f01d51c6bf875905db1725702bef3f545558f8e5b1924f0",
+  "chosen_sound": "Pocket Lab",
+  "camera_adapter_verified": false,
+  "user_selected_character_family": "Diskette (second illustrated direction)",
+  "compact_format": "Indexed pose bank + sampled transform tracks + sound cue sheet",
+  "compact_asset_bytes": 196672,
+  "poses": 12,
+  "duration_ms": 7600,
+  "key_times_ms": [
+    0,
+    450,
+    600,
+    1450,
+    2950,
+    3500
+  ],
+  "user_selected_character": "Diskette Terminal",
+  "recommended_transition": null,
+  "transition_suggestions": [
+    "Disk Dash",
+    "Pixel Portal",
+    "Rocket Delivery"
+  ],
+  "sound_peak_gain": 1,
+  "enter_ms": 1400,
+  "performance_ms": 5000,
+  "leave_ms": 1200,
+  "fps": 30,
+  "native_player_covers": "Earlier 350 ms transitions only",
+  "selection": "Random shuffled sets of all three, no immediate repeats",
+  "atlas_bleed_fixed": true,
+  "facing": "Authored per action; mirrored poses and flame sockets; brief anticipation turns"
+}
