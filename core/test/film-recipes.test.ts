@@ -12,6 +12,9 @@ import { GR3X_FILMS_DEFAULTS_MODULE } from '../src/fw/gr3x/films-defaults-native
 import { GR3X_FILMS_GRAIN_MODULE } from '../src/fw/gr3x/films-grain-native';
 import { GR3X_FILM_IDS } from '../src/fw/gr3x/look-resources';
 import { GR3X_T4_CUSTOM } from '../src/fw/gr3x/geometry';
+import { COLOUR_LUT_FILMS, colourLutBytes } from '../src/color/colourlut';
+import { COLOUR_LUT_CODE } from '../src/fw/gr3x/colourlut-code';
+import { Firmware } from '../src/fw/container';
 
 describe('film recipes: the starting values', () => {
   it('encodes the parameters as films.c reads them (order, scales, Halation states)', () => {
@@ -183,6 +186,54 @@ describe.skipIf(!firmware)('film recipes in a GR III 2.10 build', () => {
     expect(s2.verified).toBe(true);
     expect(s2.slots.every(s => s.filmMtf === undefined)).toBe(true);
     await expect(engine.buildFirmware([{ slot: 'CY', filmMtf: true }], ratios, [], {})).rejects.toThrow();
+  }, 600000);
+
+  it('the colour LUT: put into the JPEG stage first, verified, read back; a build without it differs; it needs a film count and a table that exists', async () => {
+    const engine = await open();
+    const requests = LOOKS.slice(0, 3).map((l, i) => {
+      const r = engine.convertPreset('cube', cubeText(l, 17));
+      return { slot: GR3X_FILM_IDS[i], preset: { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) },
+        ...(i === 0 ? { colourLut: 'CineStill 800T' } : i === 2 ? { colourLut: 'Kodachrome 64' } : {}), ...(i === 1 ? { filmMtf: true } : {}) };
+    });
+    const options = { filmCount: 4, adjSoftFocus: true, dateStamp: true, tealHue: true, grainRow: true };
+    const build = await engine.buildFirmware(requests, ratios, [], options);
+    expect(Object.values(build.checks).every(v => v === true)).toBe(true);
+    const summary = await (await open()).inspect(build.file);
+    expect(summary.verified).toBe(true);
+    expect(summary.slots.map(s => s.colourLut)).toEqual(['CineStill 800T', undefined, 'Kodachrome 64', undefined]);
+    expect(summary.slots.map(s => s.filmMtf === true)).toEqual([false, true, false, false]);
+    const plain = await engine.buildFirmware(requests.map(({ colourLut: _c, ...r }) => r), ratios, [], options);
+    expect(plain.sha256).not.toBe(build.sha256);
+    const s2 = await (await open()).inspect(plain.file);
+    expect(s2.verified).toBe(true);
+    expect(s2.slots.every(s => s.colourLut === undefined)).toBe(true);
+    // The module and both tables are in the file; the plain build has neither.
+    const has = (hay: Uint8Array, needle: Uint8Array) => Buffer.from(hay).includes(Buffer.from(needle));
+    const mine = new Firmware(build.file).decoded, theirs = new Firmware(plain.file).decoded;
+    // Only the tables of the films that use one are in the file (CineStill 800T and Kodachrome 64 here), none in the plain build.
+    for (const film of COLOUR_LUT_FILMS) { expect(has(mine, colourLutBytes(film)!)).toBe(['CineStill 800T', 'Kodachrome 64'].includes(film)); expect(has(theirs, colourLutBytes(film)!)).toBe(false); }
+    expect(has(mine, Buffer.from(COLOUR_LUT_CODE, 'base64'))).toBe(true);
+    expect(has(theirs, Buffer.from(COLOUR_LUT_CODE, 'base64'))).toBe(false);
+    await expect(engine.buildFirmware([{ slot: 'CY', colourLut: 'CineStill 800T' }], ratios, [], {})).rejects.toThrow();
+    await expect(engine.buildFirmware(requests.map((r, i) => (i === 0 ? { ...r, colourLut: 'Portra 400' } : r)), ratios, [], options)).rejects.toThrow(/colour LUT/);
+  }, 600000);
+
+  it('the colour LUT with five tables (Classic Neg, Classic Chrome, Kodachrome 64, CineStill 800T, Blockbuster): every table in the file, the others without', async () => {
+    const engine = await open();
+    const names = ['Classic Chrome', 'Classic Neg', 'Kodachrome 64', 'CineStill 800T', 'Blockbuster'];
+    const requests = LOOKS.slice(0, 6).map((l, i) => {
+      const r = engine.convertPreset('cube', cubeText(l, 17));
+      return { slot: GR3X_FILM_IDS[i], preset: { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) }, ...(i < 5 ? { colourLut: names[i] } : {}) };
+    });
+    const options = { filmCount: 6, adjSoftFocus: true, dateStamp: true, tealHue: true, grainRow: true };
+    const build = await engine.buildFirmware(requests, ratios, [], options);
+    expect(Object.values(build.checks).every(v => v === true)).toBe(true);
+    const summary = await (await open()).inspect(build.file);
+    expect(summary.verified).toBe(true);
+    expect(summary.slots.map(s => s.colourLut)).toEqual([...names, undefined]);
+    const mine = new Firmware(build.file).decoded;
+    for (const f of names) expect(Buffer.from(mine).includes(Buffer.from(colourLutBytes(f)!))).toBe(true);
+    await expect(engine.buildFirmware(requests.map((r, i) => (i === 5 ? { ...r, colourLut: 'Gold 200' } : r)), ratios, [], options)).rejects.toThrow(/colour LUT/);
   }, 600000);
 
   it('recipes need a film count (round 10), and only GR III / IIIx films have them', async () => {

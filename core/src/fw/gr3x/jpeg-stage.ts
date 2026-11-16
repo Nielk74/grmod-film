@@ -38,6 +38,8 @@ import type { HalationLightR6 } from './halation-r6';
 import { GR3X_DATESTAMP_DIAG_R6_CODE, GR3X_HALATION_STATUS_R6_CODE } from './picture-modules-r6';
 import { GRAIN_CODE } from './grain-code';
 import { FILM_MTF_CODE } from './filmmtf-code';
+import { COLOUR_LUT_CODE } from './colourlut-code';
+import { COLOUR_LUT_BYTES, COLOUR_LUT_MAGIC, COLOUR_LUT_MAX_TABLES, colourLutBytes } from '../../color/colourlut';
 import { filmMtfMatrices } from '../../color/filmmtf';
 import { GRAIN_GAIN, GRAIN_MAGIC, grainTone } from '../../color/grain';
 import { GRAIN_COLOUR_TILES, GRAIN_LUMA_TILES } from '../../color/grain-tables';
@@ -104,6 +106,10 @@ export interface Gr3xJpegOptions {
   /** Round 10, GR Mod's film recipes: the films whose sharpness is the film's own (their dye layers' MTF), made by tools/filmmtf/filmmtf.c
    * before the halation and the grain (so the grain is not softened by it): a flag per film. */
   filmMtf?: { films: readonly boolean[] };
+  /** Round 10, GR Mod's film recipes: the films with a 3D colour LUT (tools/colourlut/colourlut.c, core/src/color/colourlut.ts), made FIRST in the
+   * chain (before the film MTF, halation, grain and date: it is colour correction, and the texture steps must see the corrected colour).
+   * A value per film: the name of the film whose table it gets (COLOUR_LUT_FILMS), or undefined: no LUT (the module returns at once). */
+  colourLut?: { films: readonly (string | undefined)[] };
 }
 
 const u32le = (words: readonly number[]) => wordsToBytes(words.map(w => w >>> 0));
@@ -111,9 +117,11 @@ const u16le = (v: readonly number[]) => { const b = new Uint8Array(v.length * 2)
 const addr = (r: string, a: number) => `movw ${r},#${a & 65535};movt ${r},#${a >>> 16};`;
 
 export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
-  if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain && !o.filmMtf) return undefined;
+  if (!o.halation && !o.halation7 && !o.diagnostics && !o.grain && !o.filmMtf && !o.colourLut) return undefined;
   if (o.filmMtf && (!o.halation7 || o.filmMtf.films.length !== o.halation7.light.length || o.diagnostics))
     throw new FirmwareError('bad-edit', 'IIIx film MTF: round 10 films, a flag per film');
+  if (o.colourLut && (!o.halation7 || o.colourLut.films.length !== o.halation7.light.length || o.diagnostics || o.colourLut.films.some(f => f !== undefined && !colourLutBytes(f))))
+    throw new FirmwareError('bad-edit', 'IIIx colour LUT: round 10 films, a table name or nothing per film');
   if (o.grain && (!o.halation7 || o.grain.settings.length !== o.halation7.light.length || o.grain.settings.some(v => !Number.isInteger(v) || v < 0 || v > 7 || (o.grain!.camera === true && (v & 3) !== 0))))
     throw new FirmwareError('bad-edit', 'IIIx grain: round 10 films, a setting per film');
   if (o.halation && o.halation7) throw new FirmwareError('internal', 'IIIx halation: one form');
@@ -227,8 +235,22 @@ export function installGr3xJpegStage(p: Gr3xJpegProgram, o: Gr3xJpegOptions) {
     entries.filmMtf = stub; entries.filmMtfModule = module; entries.filmMtfContext = ctx;
     tail = `b #${stub};`; first = stub;
   }
+  if (o.colourLut) {
+    // FIRST in the chain (built last): colour correction before the texture steps. The context: the cache functions, the stash, the magic, the
+    // look map (film k is look 32 + k: 0 none, else the table's number) and up to eight table pointers. Only the tables the films use are in the file.
+    const used = [...new Set(o.colourLut.films.filter((f): f is string => f !== undefined))];
+    if (used.length < 1 || used.length > COLOUR_LUT_MAX_TABLES) throw new FirmwareError('bad-edit', `IIIx colour LUT: one to ${COLOUR_LUT_MAX_TABLES} tables`);
+    const tables = used.map(f => { const t = colourLutBytes(f)!; if (t.length !== COLOUR_LUT_BYTES) throw new FirmwareError('internal', 'IIIx colour LUT: table size'); return p.append(t); });
+    const map = new Uint8Array(64);
+    o.colourLut.films.forEach((f, k) => { if (f !== undefined) map[GR3X_HALATION_FILM_STYLE + k] = used.indexOf(f) + 1; });
+    const ctx = p.append(new Uint8Array([...u32le([CACHE, CACHE_FLUSH_FOR_READ, CACHE_CLEAN, GR3X_HALATION_STASH, COLOUR_LUT_MAGIC]), ...map, ...u32le(Array.from({ length: COLOUR_LUT_MAX_TABLES }, (_, i) => tables[i] ?? 0))]));
+    const module = p.append(Uint8Array.from(atob(COLOUR_LUT_CODE), c => c.charCodeAt(0)));
+    const stub = p.code(`push {r0-r3,ip,lr};ldr r1,[r1,#8];${addr('r0', ctx)}bl #${module};pop {r0-r3,ip,lr};${tail}`);
+    entries.colourLut = stub; entries.colourLutModule = module; entries.colourLutContext = ctx; entries.colourLutTables = tables[0];
+    tail = `b #${stub};`; first = stub;
+  }
   Object.assign(entries, entries7);
-  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), o.filmMtf ? 'JPEG encode step: film MTF, halation, grain, then the date imprint' : o.grain ? 'JPEG encode step: halation, grain, then the date imprint' : 'JPEG encode step: halation, then the date imprint');
+  if (o.after !== undefined) p.retarget!(GR3X_JPEG_EXECUTE, branchWord(GR3X_JPEG_EXECUTE, first), o.colourLut ? 'JPEG encode step: colour LUT, film MTF, halation, grain, then the date imprint' : o.filmMtf ? 'JPEG encode step: film MTF, halation, grain, then the date imprint' : o.grain ? 'JPEG encode step: halation, grain, then the date imprint' : 'JPEG encode step: halation, then the date imprint');
   else p.patch(GR3X_JPEG_EXECUTE, 0xe1a0c00d, branchWord(GR3X_JPEG_EXECUTE, first), 'JPEG encode step: GR Mod picture modules');
   return entries;
 }

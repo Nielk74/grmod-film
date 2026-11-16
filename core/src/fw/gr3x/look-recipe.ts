@@ -2,6 +2,7 @@
 // Self-describing build input, never executable. Inspection rebuilds from the
 // exact official image and requires byte identity before trusting a T5 file.
 import { FirmwareError } from '../types';
+import { colourLutBytes } from '../../color/colourlut';
 import type { Gr3xLookOptions } from './image-control';
 import { gr3xCanonicalDefaults, validateGr3xFilmDefaults, validateGr3xGrain } from './film-recipe';
 export const GR3X_RECIPE_MAGIC = new TextEncoder().encode('GR3X-T5-RECIPE\0');
@@ -30,6 +31,7 @@ export function encodeGr3xLookRecipe(options: Gr3xLookOptions): Uint8Array {
       ...(gr3xCanonicalDefaults(f.defaults) ? { defaults: gr3xCanonicalDefaults(f.defaults) } : {}),
       ...(f.grain && f.grain.amount ? { grain: { amount: f.grain.amount, size: f.grain.size } } : {}),
       ...(f.filmMtf === true ? { filmMtf: true } : {}),
+      ...(f.colourLut !== undefined ? { colourLut: f.colourLut } : {}),
     })),
   };
   const data = new TextEncoder().encode(JSON.stringify(recipe));
@@ -65,12 +67,14 @@ export function readGr3xLookRecipe(appendedRtos: Uint8Array): Gr3xLookOptions | 
       if (f.names !== undefined && (typeof f.names !== 'object' || Object.values(f.names).some(v => typeof v !== 'string')))
         throw new FirmwareError('bad-edit', 'invalid IIIx recipe names');
       if (f.halation !== undefined && (![1, 2].includes(f.halation) || r.filmCount !== undefined)) throw new FirmwareError('bad-edit', 'invalid IIIx recipe halation');
-      if ((f.defaults !== undefined || f.grain !== undefined || f.filmMtf !== undefined) && r.filmCount === undefined) throw new FirmwareError('bad-edit', 'invalid IIIx film recipe');
+      if ((f.defaults !== undefined || f.grain !== undefined || f.filmMtf !== undefined || f.colourLut !== undefined) && r.filmCount === undefined) throw new FirmwareError('bad-edit', 'invalid IIIx film recipe');
       if (f.filmMtf !== undefined && f.filmMtf !== true) throw new FirmwareError('bad-edit', 'invalid IIIx film recipe (film MTF)');
+      if (f.colourLut !== undefined && (typeof f.colourLut !== 'string' || !colourLutBytes(f.colourLut))) throw new FirmwareError('bad-edit', 'invalid IIIx film recipe (colour LUT)');
       validateGr3xFilmDefaults(f.defaults); validateGr3xGrain(f.grain);
       return { name: f.name, ...(f.names ? { names: f.names } : {}), ...(f.icon ? { icon: Uint8Array.from(f.icon) } : {}),
         ...(f.params ? { params: f.params } : {}), ...(f.preset ? { preset: f.preset } : {}), ...(f.halation ? { halation: f.halation } : {}),
-        ...(f.defaults ? { defaults: f.defaults } : {}), ...(f.grain ? { grain: f.grain } : {}), ...(f.filmMtf === true ? { filmMtf: true } : {}) };
+        ...(f.defaults ? { defaults: f.defaults } : {}), ...(f.grain ? { grain: f.grain } : {}), ...(f.filmMtf === true ? { filmMtf: true } : {}),
+        ...(f.colourLut !== undefined ? { colourLut: f.colourLut } : {}) };
     }) };
   }
   return null;

@@ -175,6 +175,8 @@ export interface SlotRequest {
   grain?: Grain;
   /** Round 10: the film's own sharpness, made in the JPEG step (tools/filmmtf/filmmtf.c, core/src/color/filmmtf.ts). */
   filmMtf?: boolean;
+  /** Round 10: the film's 3D colour LUT, by the name of the film whose table it gets (COLOUR_LUT_FILMS), made first in the JPEG step (tools/colourlut/colourlut.c). */
+  colourLut?: string;
 }
 
 /** Soft focus on one negative clarity setting: its row of the clarity table gets the gains of `strength`. */
@@ -231,6 +233,7 @@ export interface FirmwareSummary {
     defaults?: Gr3xFilmDefaults;
     grain?: Grain;
     filmMtf?: boolean;
+    colourLut?: string;
   }[];
   /** Aspect ratios this file adds to the camera (empty when none, or when they cannot be read). */
   ratios: BuiltRatio[];
@@ -588,6 +591,7 @@ export class Engine {
           ...(looks!.films?.[i]?.defaults ? { defaults: looks!.films![i].defaults } : {}),
           ...(looks!.films?.[i]?.grain ? { grain: looks!.films![i].grain } : {}),
           ...(looks!.films?.[i]?.filmMtf ? { filmMtf: true } : {}),
+          ...(looks!.films?.[i]?.colourLut ? { colourLut: looks!.films![i].colourLut } : {}),
         })) : [], ratios: matched ? candidate!.ratios : [], softFocus: matched ? softFocus : [],
         adjSoftFocus: matched && adjSoftFocus, dateStamp: matched && dateImprint, monoUnlock: matched && looks?.monoReplicas === true, extraSlots: [],
         ...(matched && pictures.length ? { shutdownPictures: pictures.map((p, k) => ({ id: p.id ?? k + 1, name: p.name, jpeg: p.jpeg })) } : {}),
@@ -949,7 +953,7 @@ export class Engine {
           const own = Object.fromEntries(given.filter(([, v]) => v !== name));
           if ((r?.defaults || r?.grain) && filmCount === undefined) throw new FirmwareError('bad-edit', 'film recipes need a film count');
           return { name, ...(Object.keys(own).length ? { names: own } : {}), ...(r?.preset ? { preset: r.preset } : {}), ...(r?.icon ? { icon: r.icon } : {}),
-            ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain && r.grain.amount ? { grain: r.grain } : {}), ...(r?.filmMtf ? { filmMtf: true } : {}),
+            ...(r?.defaults ? { defaults: r.defaults } : {}), ...(r?.grain && r.grain.amount ? { grain: r.grain } : {}), ...(r?.filmMtf ? { filmMtf: true } : {}), ...(r?.colourLut ? { colourLut: r.colourLut } : {}),
             // Round 6: Halation is set in the camera (each film has the line).
             ...(typeof r?.halation === 'number' && r.halation > 0 && filmCount === undefined ? { halation: r.halation as 1 | 2 } : {}) };
         }),

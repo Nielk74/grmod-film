@@ -29,6 +29,10 @@
  *    tools/filmmtf/filmmtf.c): a boost of 8..33 pixel structures and a softer fine detail, softest in the red layer. It replaces the
  *    camera's Sharpness and Clarity (both start at 0) and runs before the halation and the grain. About 3 times the
  *    grain's work per picture; not checked on a camera.
+ *  - a 3D colour LUT on CineStill 800T, Kodachrome 64, Classic Neg, Classic Chrome and Blockbuster only (COLOUR_LUT): the approved colour engine's
+ *    tables and the three full-look tables (core/src/color/colourlut.ts, colourlut-tables.ts, tools/colourlut/make_lut.py), applied first in the JPEG step by tools/colourlut/colourlut.c, before the film MTF, halation and grain, on the main
+ *    picture, screennail and thumbnail. Every other film, Portra 400 above all, is untouched by it. About 55 M instructions per megapixel in
+ *    the emulator; not checked on a camera.
  * Not in the firmware: shoot films with Highlight Correction (D-Range) on in contrasty light; it is the
  * camera's own film latitude (one stop less exposure, pushed back in the JPEG) and a camera-wide setting.
  *
@@ -66,6 +70,8 @@ const SHOULDER: Record<string, number> = { 'Portra 400': 0.03, 'CineStill 800T':
  * Kodak Portra 400's (the only stock measured here), so the other films get Portra's sharpness character. Their Sharpness and Clarity
  * start at 0 (the film's MTF replaces them, and the authored values of the other films are dropped). */
 const FILM_MTF = new Set([...LOOKS.map(l => l.name), 'Pro 400H']);
+/** The films with a 3D colour LUT (the film whose table each gets, core/src/color/colourlut.ts): these five only. */
+const COLOUR_LUT: Record<string, string> = Object.fromEntries(['CineStill 800T', 'Kodachrome 64', 'Classic Neg', 'Classic Chrome', 'Blockbuster'].map(n => [n, n]));
 
 const [official, film1Cube, pictureDir, out] = process.argv.slice(2).filter(a => a !== '--');
 if (!official || !film1Cube || !pictureDir || !out) {
@@ -128,7 +134,8 @@ for (const [i, base] of LOOKS.entries()) {
   const icon = filmIcon(tile, look);
   requests.push({ slot: GR3X_FILM_IDS[i], names: { en: look.name }, icon,
     preset: { matrixQ13: r.matrixQ13, curves: r.curves, ...(r.postQ9 ? { postQ9: r.postQ9 } : {}) },
-    ...(look.recipe?.defaults ? { defaults: look.recipe.defaults } : {}), ...(look.recipe?.grain ? { grain: look.recipe.grain } : {}), ...(FILM_MTF.has(look.name) ? { filmMtf: true } : {}) });
+    ...(look.recipe?.defaults ? { defaults: look.recipe.defaults } : {}), ...(look.recipe?.grain ? { grain: look.recipe.grain } : {}), ...(FILM_MTF.has(look.name) ? { filmMtf: true } : {}),
+    ...(COLOUR_LUT[look.name] ? { colourLut: COLOUR_LUT[look.name] } : {}) });
   report.push({ film: i + 1, name: look.name, version: how, about: look.about, ...(look.recipe ? { recipe: look.recipe } : {}),
     meanDE2000: +r.meanDE2000!.toFixed(2), p95DE2000: +r.p95DE2000!.toFixed(2), postMatrix: !!r.postQ9 });
   for (let y = 0; y < 40; y++) for (let x = 0; x < 40; x++) {
@@ -152,7 +159,7 @@ const build = await engine.buildFirmware(requests, ratios, [], { filmCount: LOOK
 const checks = Object.entries(build.checks);
 if (!checks.every(([, v]) => v === true)) throw new Error('self-check failed: ' + JSON.stringify(build.checks));
 const summary = await (await Engine.open(raw)).inspect(build.file);
-if (!summary.verified || summary.slots.length !== LOOKS.length || summary.slots.some((s, i) => s.names.en !== films[i].name || (s.filmMtf === true) !== FILM_MTF.has(films[i].name)) || summary.shutdownPictures?.length !== PICTURE_NAMES.length || !summary.tealHue || !summary.grainRow)
+if (!summary.verified || summary.slots.length !== LOOKS.length || summary.slots.some((s, i) => s.names.en !== films[i].name || (s.filmMtf === true) !== FILM_MTF.has(films[i].name) || s.colourLut !== COLOUR_LUT[films[i].name]) || summary.shutdownPictures?.length !== PICTURE_NAMES.length || !summary.tealHue || !summary.grainRow)
   throw new Error('a fresh engine does not rebuild the same file');
 
 // The reshaped halation must be in the file: its parameter block and its gains.

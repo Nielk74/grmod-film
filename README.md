@@ -29,6 +29,12 @@ the film work on top, in two commits you can read. GR Mod's own documentation is
   softest) on the main picture, in strips so it needs a few megabytes. On every film of the v3 pack, with Kodak Portra 400's curves
   (`FILM_MTF` in `examples/gr3x/film-pack-v3/build.ts`; the camera Sharpness and Clarity start at 0). About three times the grain's work per
   picture; checked against its TypeScript reference byte for byte in an emulator (`tools/filmmtf/check.py`), not tried on a camera.
+- **Colour LUT** (`tools/colourlut/colourlut.c`, `core/src/color/colourlut.ts`): a per-film 33x33x33 3D table of Q4 deltas (dY, dCb, dCr)
+  on the YCbCr 4:2:2 pictures, by integer tetrahedral interpolation, first in the JPEG step (before the film MTF, halation and grain) on the
+  main picture, screennail and thumbnail. CineStill 800T and Kodachrome 64 only in the v3 pack (`COLOUR_LUT` in
+  `examples/gr3x/film-pack-v3/build.ts`); the tables come from the colour engine prototype (`tools/colourlut/tables.py`). About 57 M
+  instructions per megapixel in the emulator; equal byte for byte to its TypeScript reference and to the prototype's `lut_apply_422`
+  on real pictures (`tools/colourlut/check.py`), not tried on a camera.
 - **Halation colours**: red, orange, gold and white, kept in the film's Toning byte with the Halation state
   (`core/src/fw/gr3x/halation-rows.ts`). The parameter screen sizes its list for a film's 12..13 lines.
 - **Preview** (`ui`): films applied to genuine GR III JPEGs (`ui/src/assets/samples`) with colour, halation and grain, 1:1
