@@ -34,11 +34,14 @@ ADAPTER = {'diag': 'camera_diag.c', 'diage': 'camera_diag_e.c', 'diagf': 'camera
 BUILD = OUT/'build'
 EXPECTED_PACK_SHA256 = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
 ENGINE_SHA256 = '3367220a951724908c06128cf70c39dc5587ff3ca6e52b2a417d071e5a558ebe'
+# 2026-11-16: the colour engine without the film MTF (branch colour-engine-camera 8021ed7; about 7 s less per photo). Same RTOS length.
+ENGINE_NO_MTF_SHA256 = '5a4d2726c1264ef9d2148f922fe02f313e573a367a854bb010692f91d22431ed'
 # The bases this linker accepts, each with the facts that were established for it (every other image is refused). A base is accepted only
 # when its hash is listed AND the checks in verify_base() hold on its bytes.
 BASES = {
     EXPECTED_PACK_SHA256: dict(name='film pack v3 (2026-11-02)', rtosBytes=18478528, imageBytes=38408796),
     ENGINE_SHA256: dict(name='colour engine, five LUT tables (2026-11-09)', rtosBytes=19559872, imageBytes=39490228),
+    ENGINE_NO_MTF_SHA256: dict(name='colour engine without the film MTF (2026-11-16)', rtosBytes=19559872, imageBytes=39490228),
 }
 RESERVED_RAM = (0x558043b8, 0x558043bc, 0x55804390, 0x5580438c, 0x55804394, 0x55804398)   # state word, latch word (unused), event count word, allocation-failure word
 sha = pack_tools.sha

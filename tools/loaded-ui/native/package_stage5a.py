@@ -22,6 +22,10 @@ OUT = LAB/'out'/('firmware-loaded-stage5a-' + ('test3-' if TEST else '') + ('eng
 BUILD = OUT/'build'
 ENGINE_SHA = '3367220a951724908c06128cf70c39dc5587ff3ca6e52b2a417d071e5a558ebe'
 FILMPACK_SHA = 'cf04126f5861c3a64123f0cdc95efa5b65443b44aa0ca975854423acf0131f55'
+# LOADED_ENGINE_NO_MTF=1: the engine base without the film MTF (2026-11-16, about 7 s less per film photo).
+NO_MTF = ENGINE and os.environ.get('LOADED_ENGINE_NO_MTF') == '1'
+if NO_MTF:
+    ENGINE_SHA = '5a4d2726c1264ef9d2148f922fe02f313e573a367a854bb010692f91d22431ed'
 BASE_SHA = ENGINE_SHA if ENGINE else FILMPACK_SHA
 
 
@@ -60,7 +64,9 @@ def main():
     (OUT/'verification-summary.json').write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8', newline='\n')
     detours = hooks['detourCases'] if isinstance(hooks['detourCases'], int) else len(hooks['detourCases'])
     earlier_text = ', '.join(f"{k} `{v[:8]}...`" for k, v in earlier.items())
-    base_text = (f"the colour engine build `{ENGINE_SHA}` ({len(pack):,} bytes: the film pack plus the per-film 3D colour tables), read only, never modified. "
+    base_text = (f"the colour engine build **without the film MTF** `{ENGINE_SHA}` ({len(pack):,} bytes: the film pack plus the per-film 3D colour tables; the film sharpness step that cost about 7 s per film photo is gone), read only, never modified. "
+                 "Your colour engine looks are kept. The rollback is that same unmodified file (no film MTF either); the previous engine image with the film MTF begins `3367220a`." if NO_MTF else
+                 f"the colour engine build `{ENGINE_SHA}` ({len(pack):,} bytes: the film pack plus the per-film 3D colour tables), read only, never modified. "
                  "Your colour engine looks are kept. The rollback is that same unmodified file." if ENGINE else
                  f"the plain film pack `{FILMPACK_SHA}` ({len(pack):,} bytes). **The colour engine is not in this image** (this is the film-pack twin of the engine image from the same sources): flashing it removes the colour engine until you flash the engine image again. Settings are safe: the engine build is the film pack plus a module.")
     n = 3 if TEST else 36
