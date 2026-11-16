@@ -22,15 +22,11 @@
  *  - grain v2 (tools/grain/grain.c: tiles from the Boolean film grain model, colour grain, strongest in
  *    the shadows and lower midtones), Portra 400 one step up (Medium, as Kodak's Print Grain Index
  *    suggests);
- *  - film sharpness (MTF) through the camera's own controls: Sharpness at most -1 (less of the camera's
- *    sharpening), Clarity +1 where a film does not set it (development's edge effects). The controls'
- *    exact response is not checked on a camera;
- *  - every film's own sharpness (FILM_MTF): Kodak Portra 400's MTF curves per dye layer, made in the JPEG step (core/src/color/filmmtf.ts,
- *    tools/filmmtf/filmmtf.c): a boost of 8..33 pixel structures and a softer fine detail, softest in the red layer. It replaces the
- *    camera's Sharpness and Clarity (both start at 0) and runs before the halation and the grain. About 3 times the
- *    grain's work per picture; not checked on a camera.
+ *  - no film MTF any more (2026-11-16): tools/filmmtf/filmmtf.c cost about 7 s per photo on the camera (3.35 G instructions per 24 MP picture)
+ *    and on the user's photos it was visually a Gaussian blur of about 0.8 px (scratch/mtf-side-by-side). The user dropped it. Every film's
+ *    Sharpness and Clarity still start at 0, as with the MTF: a non-zero Clarity runs the camera's own Clarity step, whose cost is not measured.
  *  - a 3D colour LUT on CineStill 800T, Kodachrome 64, Classic Neg, Classic Chrome and Blockbuster only (COLOUR_LUT): the approved colour engine's
- *    tables and the three full-look tables (core/src/color/colourlut.ts, colourlut-tables.ts, tools/colourlut/make_lut.py), applied first in the JPEG step by tools/colourlut/colourlut.c, before the film MTF, halation and grain, on the main
+ *    tables and the three full-look tables (core/src/color/colourlut.ts, colourlut-tables.ts, tools/colourlut/make_lut.py), applied first in the JPEG step by tools/colourlut/colourlut.c, before the halation and grain, on the main
  *    picture, screennail and thumbnail. Every other film, Portra 400 above all, is untouched by it. About 55 M instructions per megapixel in
  *    the emulator; not checked on a camera.
  * Not in the firmware: shoot films with Highlight Correction (D-Range) on in contrasty light; it is the
@@ -66,10 +62,9 @@ const COLOUR_PUSH: Record<string, [number, number]> = { 'Gold 200': [1, 0], 'Nos
 const END_GREY_WEIGHT = 24;
 /** The user's focus films get a highlight shoulder (OkLab L that white drops by; story chapter 35). */
 const SHOULDER: Record<string, number> = { 'Portra 400': 0.03, 'CineStill 800T': 0.03, 'Gold 200': 0.03 };
-/** The films with their own sharpness, made in the JPEG step from the film's MTF (core/src/color/filmmtf.ts): all twenty. The curves are
- * Kodak Portra 400's (the only stock measured here), so the other films get Portra's sharpness character. Their Sharpness and Clarity
- * start at 0 (the film's MTF replaces them, and the authored values of the other films are dropped). */
-const FILM_MTF = new Set([...LOOKS.map(l => l.name), 'Pro 400H']);
+/** The films made with the film MTF in the JPEG step (core/src/color/filmmtf.ts): none since 2026-11-16 (about 7 s per photo, visually a
+ * 0.8 px blur; the user dropped it). The module stays in the code base for reference. */
+const FILM_MTF = new Set<string>();
 /** The films with a 3D colour LUT (the film whose table each gets, core/src/color/colourlut.ts): these five only. */
 const COLOUR_LUT: Record<string, string> = Object.fromEntries(['CineStill 800T', 'Kodachrome 64', 'Classic Neg', 'Classic Chrome', 'Blockbuster'].map(n => [n, n]));
 
@@ -96,13 +91,12 @@ const film1: Look = { ...proNegHi, name: 'Pro 400H', caption: 'PRO 400H', code: 
   about: 'Fujifilm Pro 400H on Crystal Archive paper, from the stocks\' datasheets: cyan-teal skies, slightly green highlights, dense greens.',
   recipe: { defaults: { sharpness: -1 }, grain: { amount: 1, size: 'small' } } };
 
-/** v3's recipe changes: Portra 400 one grain step up (Kodak's Print Grain Index), and film sharpness:
- * Sharpness at most -1, Clarity +1 where the film does not set it. */
+/** v3's recipe changes: Portra 400 one grain step up (Kodak's Print Grain Index), and Sharpness and Clarity at 0. */
 function v3Recipe(look: Look): NonNullable<Look['recipe']> {
   const r = look.recipe ?? {}, d = r.defaults ?? {};
   const grain = look.name === 'Portra 400' && r.grain ? { ...r.grain, amount: 2 as const } : r.grain;
-  if (FILM_MTF.has(look.name)) return { ...r, defaults: { ...d, sharpness: 0, clarity: 0 }, ...(grain ? { grain } : {}) };
-  return { ...r, defaults: { ...d, sharpness: Math.min(d.sharpness ?? 0, -1), clarity: d.clarity ?? 1 }, ...(grain ? { grain } : {}) };
+  // Sharpness and Clarity start at 0 for every film, as they did with the film MTF (the camera already ran them this way).
+  return { ...r, defaults: { ...d, sharpness: 0, clarity: 0 }, ...(grain ? { grain } : {}) };
 }
 
 function fit(text: string): PresetResult | null {
